@@ -73,8 +73,18 @@ def _remote_creds(ctx: RunContext) -> tuple[str, str]:
     return host, token
 
 
-def run_replicate(ctx: RunContext, *, full: bool = True, delete_model: bool = True) -> None:
-    """Pull in-scope models from the remote source and import into the local dest."""
+def run_replicate(
+    ctx: RunContext,
+    *,
+    full: bool = True,
+    delete_model: bool = True,
+    models_override: list | None = None,
+) -> None:
+    """Pull models from the remote source and import into the local dest.
+
+    ``models_override`` lets CDC replicate only the models that changed; when None
+    the full in-scope set is resolved on the source.
+    """
     cfg, direction, audit = ctx.cfg, ctx.direction, ctx.audit
     host, token = _remote_creds(ctx)
 
@@ -92,7 +102,7 @@ def run_replicate(ctx: RunContext, *, full: bool = True, delete_model: bool = Tr
     t0 = time.time()
     try:
         with _ambient_identity(host, token):
-            models = resolve_models(LOCAL_REGISTRY, cfg.models.get("include", []))
+            models = models_override or resolve_models(LOCAL_REGISTRY, cfg.models.get("include", []))
             if not models:
                 raise ValueError("No models in scope on source (config models.include is empty)")
             models_csv = ",".join(models)

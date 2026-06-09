@@ -56,7 +56,10 @@ class ModelsDRModule(BaseDRModule):
     def cdc(self) -> None:
         cdc.run_cdc(self.ctx)
         if self.cfg.models.get("replicate_grants", False):
-            grants.replicate_grants(self.ctx)
+            try:
+                grants.replicate_grants(self.ctx)
+            except Exception as e:  # noqa: BLE001
+                self.log.warning("Grants replication skipped (not yet cross-workspace aware): %s", e)
 
     def validate(self) -> None:
         for model in resolve_models(self.ctx.direction.source.registry_uri,
