@@ -38,6 +38,7 @@ def seed_primary(cfg: Config, n_versions: int = 2) -> str:
     # experiment collides on import when the same Git folder exists in the
     # destination workspace, so DR-managed models use a dedicated location.
     experiment_path = f"/Shared/dr/experiments/{catalog}_{schema}_iris_dr_model"
+    _ensure_workspace_dir("/Shared/dr/experiments")  # MLflow won't create the tree
     mlflow.set_experiment(experiment_path)
     _logger.info("Using experiment %s", experiment_path)
 
@@ -75,6 +76,17 @@ def seed_primary(cfg: Config, n_versions: int = 2) -> str:
 
     _logger.info("Seed complete: %s (versions=1..%s)", model_name, last_version)
     return model_name
+
+
+def _ensure_workspace_dir(path: str) -> None:
+    """Create a workspace directory tree (MLflow needs the experiment's parent)."""
+    try:
+        from databricks.sdk import WorkspaceClient
+
+        WorkspaceClient().workspace.mkdirs(path)
+        _logger.info("Ensured workspace directory %s", path)
+    except Exception as e:  # noqa: BLE001
+        _logger.warning("Could not create workspace dir %s: %s", path, e)
 
 
 def _ensure_uc(cfg: Config) -> None:
