@@ -22,7 +22,7 @@ _logger = get_logger(__name__)
 
 @dataclass
 class AuditRow:
-    operation: str  # EXPORT|IMPORT|VERIFY|GRANTS|ENDPOINT|DEPENDENCY|FAILOVER
+    operation: str  # EXPORT|IMPORT|VERIFY|GRANTS|ENDPOINT|DEPENDENCY|FAILOVER|FAILBACK
     direction: str  # e.g. us-west-2->us-east-1
     model_name: str
     status: str = "IN_PROGRESS"  # IN_PROGRESS|SUCCESS|FAILED|SKIPPED

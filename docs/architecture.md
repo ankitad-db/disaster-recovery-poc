@@ -243,8 +243,84 @@ than forked: upstream owns object serialization, we own DR behavior.
 
 ---
 
-## 9. Production hardening (no architecture change)
+## 9. Failover & failback
+
+Steady state keeps **east a warm mirror** of west via scheduled CDC. The drill has
+two halves — both reuse the same pull engine, just in the resolved direction. No
+replication logic is duplicated; only the *direction* changes.
+
+### Direction resolution (the safety rail)
+
+`Config.direction()` decides source/dest so failover/failback never hardcode
+"west→east":
+
+- **Normal / failover sync** — `direction()` is *override-aware*: source = the
+  **active** primary (`DR_ACTIVE_PRIMARY` env, else config `role: primary`). So a
+  prolonged failover still runs CDC east→west to keep west warm.
+- **Failback** — `direction(failback=True)` resolves from the **config roles**
+  (the *home* primary), **ignoring** the override. So `east → west` is correct even
+  while `DR_ACTIVE_PRIMARY=east` is still set. Restoring roles (unsetting the
+  override) is the final, separate step — which removes a classic double-inversion
+  footgun.
+
+### The drill
+
+```mermaid
+flowchart TD
+    Steady([Steady state<br/>west=primary, east=secondary<br/>CDC west→east keeps east warm]) --> Boom{{Disaster:<br/>west region down}}
+
+    Boom --> FO[FAILOVER — run in EAST<br/><b>notebooks/04 action=failover</b><br/>failover.py run_failover]
+    FO --> FO1[No pull — east already mirrored.<br/>Scale up local endpoints,<br/>insert FAILOVER audit row]
+    FO1 --> FO2[Operator: set DR_ACTIVE_PRIMARY=east,<br/>repoint consumers to east]
+    FO2 --> Outage[East serves;<br/>new model versions created in east]
+
+    Outage --> Recover{{West region recovers}}
+    Recover --> FB[FAILBACK — run in WEST<br/><b>notebooks/04 action=failback</b>]
+    FB --> FB1[Reverse CDC east→west<br/>cdc.py run_cdc, direction failback=True<br/>reads dr_remote_east scope in WEST]
+    FB1 --> FB2[watermark-gated pull of<br/>outage-time versions into west]
+    FB2 --> FB3[Insert FAILBACK audit row<br/>failover.py run_failback]
+    FB3 --> Restore[Operator: unset DR_ACTIVE_PRIMARY<br/>→ back to steady state]
+    Restore --> Steady
+```
+
+| Action | Run in | Pull? | Source secret scope | Audit op |
+|---|---|---|---|---|
+| `failover` | **EAST** | no (primary may be down) | — | `FAILOVER` |
+| `failback` | **WEST** | yes, `east → west` | `dr_remote_east` (lives in WEST) | `FAILBACK` |
+
+> **Why no pull on failover:** at a real disaster the primary is unreachable, so the
+> RPO is whatever the last CDC achieved. The secondary is promoted as-is. Pulling is
+> only for failback, once the home region is healthy again.
+
+---
+
+## 10. Bidirectional secret scopes
+
+The pull always runs in the **destination** and reads the **source** via a secret
+scope held locally:
+
+| Direction | Runs in (dest) | Reads scope | Holds creds for |
+|---|---|---|---|
+| Normal / CDC (`west → east`) | EAST | `dr_remote_west` | west SPN PAT + host |
+| Failback (`east → west`) | WEST | `dr_remote_east` | east SPN PAT + host |
+
+For the failover/failback drill you must create the **mirror** scope in west
+(`dr_remote_east`) — symmetric to the `dr_remote_west` scope already in east:
+
+```bash
+# In the WEST workspace (profile dr-west):
+databricks secrets create-scope dr_remote_east --profile dr-west
+databricks secrets put-secret dr_remote_east host  --string-value \
+  "https://fe-sandbox-ps-dr-wp-us-east-1.cloud.databricks.com" --profile dr-west
+databricks secrets put-secret dr_remote_east token --string-value "<east-spn-PAT>" --profile dr-west
+```
+
+Both scope names/keys are configured in `config/dr_config.yaml` under `secrets:`.
+
+---
+
+## 11. Production hardening (no architecture change)
 
 - Replace the secret-scope PAT with a **service principal OAuth (M2M)** token; rotate it.
 - **Schedule** the CDC job (sets RPO) and alert on `FAILED` audit rows.
-- Ensure the SPN has UC read in primary and write in secondary.
+- Ensure the SPN has UC read in primary and write in secondary (and the reverse for failback).

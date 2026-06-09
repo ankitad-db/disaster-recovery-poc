@@ -109,17 +109,39 @@ class Config:
             raise ValueError(f"Expected exactly one secondary region, got {others}")
         return others[0]
 
+    def config_primary_key(self) -> str:
+        """Region key with ``role: primary`` in config, ignoring any override.
+
+        This is the *home* primary. Failback always returns here, regardless of
+        ``DR_ACTIVE_PRIMARY``, which is why it resolves from config rather than the
+        active role.
+        """
+        for key, rc in self.regions.items():
+            if rc.role == "primary":
+                return key
+        raise ValueError("No region has role 'primary' in config")
+
     def direction(self, failback: bool = False) -> Direction:
         """Resolve the replication direction.
 
-        Normal/failover sync: primary -> secondary, into the ``primary`` folder.
-        Failback: secondary -> primary, into the ``secondary`` folder.
+        Normal/failover sync: active-primary -> secondary, into the ``primary``
+        folder. ``active-primary`` honours the ``DR_ACTIVE_PRIMARY`` override, so a
+        prolonged failover still keeps the (new) secondary a warm mirror.
+
+        Failback: secondary -> home-primary, into the ``secondary`` folder. This is
+        deliberately resolved from the *config* roles (the home primary), NOT the
+        override -- failback means "return changes to the original primary" even
+        while ``DR_ACTIVE_PRIMARY`` still points at the promoted region. Restoring
+        roles (unsetting the override) is the final, separate step.
         """
-        primary = self.regions[self.active_primary_key()]
-        secondary = self.regions[self.secondary_key()]
         storage = self.storage
         if failback:
-            return Direction(source=secondary, dest=primary, folder=storage["secondary_folder"])
+            home = self.regions[self.config_primary_key()]
+            others = [k for k in self.regions if k != home.key]
+            promoted = self.regions[others[0]]
+            return Direction(source=promoted, dest=home, folder=storage["secondary_folder"])
+        primary = self.regions[self.active_primary_key()]
+        secondary = self.regions[self.secondary_key()]
         return Direction(source=primary, dest=secondary, folder=storage["primary_folder"])
 
 
