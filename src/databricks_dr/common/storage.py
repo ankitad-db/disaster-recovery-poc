@@ -66,6 +66,23 @@ def read_latest_pointer(cfg: Config, direction: Direction) -> str:
         return f.read().strip()
 
 
+def bridge_prefix(cfg: Config, direction: Direction, dry_run: bool = False) -> None:
+    """Sync the whole authored folder (exports + ``_latest.txt``) across buckets.
+
+    Robust bridge for the split workflow: copies ``s3://<src>/dr/<folder>/`` to
+    ``s3://<dst>/dr/<folder>/``. Run from a host with read on the source bucket and
+    write on the dest bucket (e.g. your laptop). In production prefer S3 CRR.
+    """
+    base = cfg.storage["base_path"]
+    src = s3_uri(direction.source.dbfs_bucket, f"{base}/{direction.folder}/")
+    dst = s3_uri(direction.dest.dbfs_bucket, f"{base}/{direction.folder}/")
+    cmd = ["aws", "s3", "sync", src, dst]
+    _logger.info("bridge_prefix: %s", " ".join(cmd))
+    if dry_run:
+        return
+    subprocess.run(cmd, check=True)
+
+
 def bridge(cfg: Config, direction: Direction, rel: str, dry_run: bool = False) -> None:
     """Move an export dir from source bucket -> dest bucket.
 

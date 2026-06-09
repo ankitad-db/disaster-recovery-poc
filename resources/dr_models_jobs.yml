@@ -7,14 +7,35 @@
 
 resources:
   jobs:
-    dr_models_baseline:
-      name: "[DR] models · baseline (full export/import)"
+    # Split baseline: deploy + run dr_models_export on the PRIMARY target,
+    # bridge the bucket (CRR / aws s3 sync), then run dr_models_import on SECONDARY.
+    dr_models_export:
+      name: "[DR] models · baseline export (run in PRIMARY)"
       run_as:
         service_principal_name: ad-dr-spn
       tasks:
-        - task_key: baseline
+        - task_key: export
           notebook_task:
-            notebook_path: ../notebooks/02_baseline.py
+            notebook_path: ../notebooks/02a_export_primary.py
+          environment_key: dr_env
+      environments:
+        - environment_key: dr_env
+          spec:
+            client: "2"
+            dependencies:
+              - "git+https://github.com/mlflow/mlflow-export-import@master"
+              - -e ..
+      queue:
+        enabled: true
+
+    dr_models_import:
+      name: "[DR] models · baseline import (run in SECONDARY)"
+      run_as:
+        service_principal_name: ad-dr-spn
+      tasks:
+        - task_key: import
+          notebook_task:
+            notebook_path: ../notebooks/02b_import_secondary.py
           environment_key: dr_env
       environments:
         - environment_key: dr_env

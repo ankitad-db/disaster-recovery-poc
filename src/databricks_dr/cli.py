@@ -15,7 +15,19 @@ from .core.base import RunContext
 from .core import registry
 
 _logger = get_logger(__name__)
-_ACTIONS = ("seed", "baseline", "cdc", "failover", "failback", "validate")
+# (CLI command name -> module method name). "import" is a Python keyword, so the
+# command is named "import" but dispatches to the module's import_() method.
+_ACTIONS = {
+    "seed": "seed",
+    "baseline": "baseline",
+    "export": "export",
+    "import": "import_",
+    "bridge": "bridge",
+    "cdc": "cdc",
+    "failover": "failover",
+    "failback": "failback",
+    "validate": "validate",
+}
 
 
 def _build_context(config_path: str | None, failback: bool, triggered_by: str, dry_run: bool) -> RunContext:
@@ -62,7 +74,7 @@ def modules():
         click.echo(m)
 
 
-def _make_action(action: str):
+def _make_action(command: str, method: str):
     @click.option("--config", "config_path", default=None, help="Path to dr_config.yaml")
     @click.option("--failback", is_flag=True, default=False, help="Run in the failback direction (secondary->primary)")
     @click.option("--triggered-by", default="MANUAL", help="SCHEDULE|AUDIT_EVENT|MANUAL")
@@ -74,10 +86,10 @@ def _make_action(action: str):
         run_ctx = _build_context(cfg_path, failback, triggered_by, dry_run)
         module_cls = registry.get_module(object_type)
         module = module_cls(run_ctx)
-        _logger.info("Running %s.%s direction=%s dry_run=%s", object_type, action, run_ctx.direction.label, dry_run)
-        getattr(module, action)()
+        _logger.info("Running %s.%s direction=%s dry_run=%s", object_type, command, run_ctx.direction.label, dry_run)
+        getattr(module, method)()
 
-    _cmd.__name__ = action
+    _cmd.__name__ = method
     return _cmd
 
 
@@ -88,8 +100,8 @@ def models(ctx: click.Context):
     ctx.obj["object_type"] = "models"
 
 
-for _action in _ACTIONS:
-    models.command(_action)(_make_action(_action))
+for _command, _method in _ACTIONS.items():
+    models.command(_command)(_make_action(_command, _method))
 
 
 if __name__ == "__main__":
