@@ -65,7 +65,11 @@ for ep in w.serving_endpoints.list():
     conf = detail.config or detail.pending_config
     served = [(s.entity_name, s.entity_version, getattr(s, "scale_to_zero_enabled", None))
               for s in ((conf.served_entities if conf else None) or [])]
-    print(ep.name, "ready=", bool(detail.config), "state=", getattr(detail, "state", None), served)
+    # Skip platform Foundation Model API endpoints (no UC entity_name) — show only
+    # endpoints that serve a UC model, i.e. the ones DR manages.
+    if not any(e[0] for e in served):
+        continue
+    print(ep.name, "ready=", bool(detail.config), served)
 # after mirror  -> scale_to_zero_enabled = True   (standby)
 # after activate-> scale_to_zero_enabled = False  (serving)
 
