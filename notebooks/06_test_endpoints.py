@@ -56,10 +56,14 @@ else:
 # COMMAND ----------
 from databricks.sdk import WorkspaceClient
 
-for ep in WorkspaceClient().serving_endpoints.list():
-    served = [(s.entity_name, s.entity_version, s.scale_to_zero_enabled)
-              for s in (ep.config.served_entities or [])]
-    print(ep.name, served)
+# list() returns lightweight ServedEntitySpec (no scale_to_zero); get() has the
+# full ServedEntityOutput with the posture flag.
+w = WorkspaceClient()
+for ep in w.serving_endpoints.list():
+    detail = w.serving_endpoints.get(ep.name)
+    served = [(s.entity_name, s.entity_version, getattr(s, "scale_to_zero_enabled", None))
+              for s in (detail.config.served_entities or [])]
+    print(ep.name, "state=", getattr(detail, "state", None), served)
 # after mirror  -> scale_to_zero_enabled = True   (standby)
 # after activate-> scale_to_zero_enabled = False  (serving)
 
