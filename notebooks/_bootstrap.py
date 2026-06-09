@@ -11,6 +11,11 @@
 import os
 import sys
 
+# Git folders are backed by WSFS, which forbids writing __pycache__ next to the
+# source files. Disable bytecode writes so importing the package doesn't error.
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 
 def _repo_root() -> str:
     ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()  # noqa: F821

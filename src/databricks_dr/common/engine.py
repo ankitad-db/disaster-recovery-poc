@@ -60,7 +60,7 @@ def export_models(
     from mlflow_export_import.bulk.export_models import export_models as _em
 
     _em(
-        models=models,
+        model_names=models,
         output_dir=output_dir,
         export_latest_versions=False,
         export_all_runs=export_all_runs,

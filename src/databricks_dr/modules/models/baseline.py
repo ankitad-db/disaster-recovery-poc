@@ -20,6 +20,7 @@ import time
 
 from ...common import engine, storage
 from ...common.audit import AuditRow
+from ...common.clients import local_or_profile_uri
 from ...core.base import RunContext
 from ._selection import resolve_models
 
@@ -32,7 +33,8 @@ def run_export(ctx: RunContext, *, full: bool = True) -> str:
     """
     cfg, direction, audit = ctx.cfg, ctx.direction, ctx.audit
     mcfg = cfg.models
-    models = resolve_models(direction.source.registry_uri, mcfg.get("include", []))
+    src_uri = local_or_profile_uri(direction.source.registry_uri)
+    models = resolve_models(src_uri, mcfg.get("include", []))
     if not models:
         raise ValueError("No models in scope (config models.include is empty)")
 
@@ -52,7 +54,7 @@ def run_export(ctx: RunContext, *, full: bool = True) -> str:
         if not ctx.dry_run:
             engine.export_models(
                 models=models_csv, output_dir=out_dir,
-                registry_uri=direction.source.registry_uri, backend=cfg.engine_backend,
+                registry_uri=src_uri, backend=cfg.engine_backend,
                 export_all_runs=full and mcfg.get("export_all_runs_on_baseline", True),
                 export_version_model=mcfg.get("export_version_model", True),
                 export_permissions=mcfg.get("export_permissions", True),
@@ -89,7 +91,7 @@ def run_import(ctx: RunContext, rel: str | None = None, *, delete_model: bool = 
         if not ctx.dry_run:
             engine.import_models(
                 input_dir=in_dir,
-                registry_uri=direction.dest.registry_uri, backend=cfg.engine_backend,
+                registry_uri=local_or_profile_uri(direction.dest.registry_uri), backend=cfg.engine_backend,
                 delete_model=delete_model,
                 import_permissions=cfg.models.get("export_permissions", True),
                 import_source_tags=True,
