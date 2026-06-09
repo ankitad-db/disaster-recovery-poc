@@ -28,8 +28,9 @@ service_principal: ad-dr-spn
 uc:
   catalog: dr_poc
   schema: ml
-  control_schema: dr_control          # audit table lives here
+  control_schema: dr_control          # audit + state tables live here
   audit_table: dr_poc.dr_control.dr_replication_audit
+  state_table: dr_poc.dr_control.dr_state   # active-primary role (failover source of truth)
 
 # Storage layout on the DBFS root buckets (folders auto-created on first write).
 storage:

@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS dr_poc.dr_control.dr_replication_audit (
   audit_id          STRING    NOT NULL COMMENT 'UUID for this audit row',
   event_time        TIMESTAMP NOT NULL COMMENT 'UTC event time',
-  operation         STRING    NOT NULL COMMENT 'EXPORT|IMPORT|VERIFY|GRANTS|ENDPOINT|DEPENDENCY|FAILOVER',
+  operation         STRING    NOT NULL COMMENT 'EXPORT|IMPORT|VERIFY|GRANTS|ENDPOINT|DEPENDENCY|FAILOVER|FAILBACK|HEALTH',
   direction         STRING             COMMENT 'e.g. us-west-2->us-east-1',
   triggered_by      STRING             COMMENT 'SCHEDULE|AUDIT_EVENT|MANUAL',
   model_name        STRING             COMMENT 'Fully-qualified model name or CSV/*',

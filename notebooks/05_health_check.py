@@ -25,7 +25,7 @@ from databricks_dr.modules.models.module import ModelsDRModule
 cfg = load_config(CONFIG_PATH)  # noqa: F821 (from _bootstrap)
 ctx = RunContext(
     cfg=cfg,
-    direction=cfg.direction(),                       # primary (remote) -> secondary (local)
+    direction=cfg.direction(spark=spark),            # primary (remote) -> secondary (local); reads dr_state  # noqa: F821
     audit=AuditLog(cfg.audit_table, spark=spark),    # noqa: F821
     triggered_by="SCHEDULE",
     spark=spark,                                     # noqa: F821

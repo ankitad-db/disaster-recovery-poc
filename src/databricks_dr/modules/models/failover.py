@@ -1,10 +1,10 @@
 """Failover and failback orchestration for the models module.
 
-Failover  : promote the secondary to serve traffic (verify replication is current,
-            scale up serving endpoints, record a FAILOVER audit marker). The role
-            flip itself is operational (set DR_ACTIVE_PRIMARY / update config).
+Failover  : promote the secondary to serve traffic (scale up serving endpoints,
+            record a FAILOVER audit marker, and persist the new active primary to
+            the ``dr_state`` control table so scheduled jobs honour the flip).
 Failback  : drain new work on the (temporary) primary, run a reverse-direction CDC
-            so changes made during the outage flow back, then restore roles.
+            so outage-time changes flow back, then reset ``dr_state`` to home.
 
 Both are deliberately thin and auditable: the heavy lifting reuses baseline/cdc in
 the resolved direction, so there is no duplicated replication logic.
@@ -12,6 +12,7 @@ the resolved direction, so there is no duplicated replication logic.
 
 from __future__ import annotations
 
+from ...common import state
 from ...common.audit import AuditRow
 from ...common.clients import is_databricks_runtime, workspace_client, workspace_client_from_creds
 from ...common.logging import get_logger
@@ -20,25 +21,46 @@ from ...core.base import RunContext
 _logger = get_logger(__name__)
 
 
+def _persist_active_primary(ctx: RunContext, key: str, reason: str) -> None:
+    """Write the durable active-role state so scheduled jobs see the role change.
+
+    Best-effort: if no spark/warehouse is available (e.g. dev CLI), the role is
+    not persisted and the operator falls back to the env override -- logged loudly.
+    """
+    if ctx.spark is None:
+        _logger.warning(
+            "No spark on RunContext; dr_state NOT updated to active_primary=%s. "
+            "Set DR_ACTIVE_PRIMARY=%s or run this from a notebook/job.", key, key,
+        )
+        return
+    state.set_active_primary(
+        ctx.cfg.state_table, key, reason=reason,
+        actor=ctx.cfg.service_principal, spark=ctx.spark,
+    )
+
+
 def run_failover(ctx: RunContext) -> None:
     """Activate the destination region (current secondary) for serving.
 
     Runs IN the secondary workspace (the local/dest region). The primary may be
     down, so this does NOT pull -- the secondary is already a warm mirror from
-    prior CDC. It only flips serving on and records the marker; the operator then
-    sets ``DR_ACTIVE_PRIMARY`` and repoints consumers.
+    prior CDC. It scales serving on, records the marker, and **persists the new
+    active primary to ``dr_state``** so scheduled jobs honour the role change
+    without any per-session env var. The operator only needs to repoint consumers.
     """
     cfg, direction, audit = ctx.cfg, ctx.direction, ctx.audit
+    promoted = direction.dest.key
     row = AuditRow(operation="FAILOVER", direction=direction.label, model_name="*",
                    triggered_by=ctx.triggered_by, actor=cfg.service_principal,
                    error_message="failover: promote secondary")
     audit.insert(row)
     try:
         _scale_up_endpoints(ctx)
+        _persist_active_primary(ctx, promoted, reason="FAILOVER")
         audit.update_status(row.audit_id, "SUCCESS",
-                            error_message=f"Promoted {direction.dest.region}. "
-                                          f"Set DR_ACTIVE_PRIMARY={direction.dest.key} and repoint consumers.")
-        _logger.info("FAILOVER complete. Promote region key '%s' to primary via DR_ACTIVE_PRIMARY.", direction.dest.key)
+                            error_message=f"Promoted {direction.dest.region}; dr_state active_primary={promoted}. "
+                                          f"Repoint consumers to {direction.dest.region}.")
+        _logger.info("FAILOVER complete. dr_state active_primary='%s'.", promoted)
     except Exception as e:  # noqa: BLE001
         audit.update_status(row.audit_id, "FAILED", error_message=str(e))
         raise
@@ -51,20 +73,22 @@ def run_failback(ctx: RunContext) -> None:
     with ``failback=True`` *before* this marker is written. Operationally:
       1. Quiesce writes on the promoted region.
       2. Reverse CDC catches the home primary up with outage-time changes.
-      3. This marker is recorded.
-      4. Restore roles (unset ``DR_ACTIVE_PRIMARY``) -- the final, separate step.
+      3. This marker is recorded and ``dr_state`` is reset to the home primary,
+         which restores steady state -- no manual env-var cleanup needed.
     """
     cfg, direction, audit = ctx.cfg, ctx.direction, ctx.audit
+    home = cfg.config_primary_key()  # destination of failback = the home primary
     row = AuditRow(operation="FAILBACK", direction=direction.label, model_name="*",
                    triggered_by=ctx.triggered_by, actor=cfg.service_principal,
                    error_message="failback: restore original primary")
     audit.insert(row)
     try:
         _scale_up_endpoints(ctx)
+        _persist_active_primary(ctx, home, reason="FAILBACK")
         audit.update_status(row.audit_id, "SUCCESS",
-                            error_message=f"Failback to {direction.dest.region} complete. "
-                                          f"Unset DR_ACTIVE_PRIMARY to restore steady state.")
-        _logger.info("FAILBACK marker recorded for direction %s.", direction.label)
+                            error_message=f"Failback to {direction.dest.region} complete; "
+                                          f"dr_state active_primary={home}. Steady state restored.")
+        _logger.info("FAILBACK complete; dr_state active_primary='%s'.", home)
     except Exception as e:  # noqa: BLE001
         audit.update_status(row.audit_id, "FAILED", error_message=str(e))
         raise

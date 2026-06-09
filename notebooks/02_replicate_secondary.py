@@ -30,7 +30,7 @@ from databricks_dr.modules.models.module import ModelsDRModule
 cfg = load_config(CONFIG_PATH)  # noqa: F821 (from _bootstrap)
 ctx = RunContext(
     cfg=cfg,
-    direction=cfg.direction(),                       # primary (remote) -> secondary (local)
+    direction=cfg.direction(spark=spark),            # primary (remote) -> secondary (local); reads dr_state  # noqa: F821
     audit=AuditLog(cfg.audit_table, spark=spark),    # noqa: F821 (Databricks-provided)
     triggered_by="MANUAL",
     spark=spark,                                     # noqa: F821

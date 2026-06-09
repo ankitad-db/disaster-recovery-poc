@@ -84,26 +84,42 @@ class Config:
     def audit_table(self) -> str:
         return self.uc["audit_table"]
 
+    @property
+    def state_table(self) -> str:
+        """Single-row control table holding the active-primary role (orchestration)."""
+        return self.uc.get("state_table") or (
+            f"{self.uc['catalog']}.{self.uc['control_schema']}.dr_state"
+        )
+
     # ---- role / direction ------------------------------------------------------
-    def active_primary_key(self) -> str:
+    def active_primary_key(self, spark=None) -> str:
         """Region key currently acting as primary.
 
-        Resolution order:
-          1. ``DR_ACTIVE_PRIMARY`` env override ("west"|"east") -- used during drills.
-          2. The region whose ``role`` is ``primary`` in config.
+        Resolution order (first match wins):
+          1. ``DR_ACTIVE_PRIMARY`` env override ("west"|"east") -- dev/drill only.
+          2. The ``dr_state`` control table (the orchestration source of truth,
+             written by failover/failback). Read only when ``spark`` is provided.
+          3. The region whose ``role`` is ``primary`` in config.
         """
         override = os.environ.get("DR_ACTIVE_PRIMARY")
         if override:
             if override not in self.regions:
                 raise ValueError(f"DR_ACTIVE_PRIMARY='{override}' not in regions {list(self.regions)}")
             return override
+        if spark is not None:
+            from . import state
+            key = state.read_active_primary(self.state_table, spark=spark)
+            if key:
+                if key not in self.regions:
+                    raise ValueError(f"dr_state active_primary='{key}' not in regions {list(self.regions)}")
+                return key
         for key, rc in self.regions.items():
             if rc.role == "primary":
                 return key
         raise ValueError("No region has role 'primary' in config")
 
-    def secondary_key(self) -> str:
-        primary = self.active_primary_key()
+    def secondary_key(self, spark=None) -> str:
+        primary = self.active_primary_key(spark)
         others = [k for k in self.regions if k != primary]
         if len(others) != 1:
             raise ValueError(f"Expected exactly one secondary region, got {others}")
@@ -121,18 +137,19 @@ class Config:
                 return key
         raise ValueError("No region has role 'primary' in config")
 
-    def direction(self, failback: bool = False) -> Direction:
+    def direction(self, failback: bool = False, spark=None) -> Direction:
         """Resolve the replication direction.
 
         Normal/failover sync: active-primary -> secondary, into the ``primary``
-        folder. ``active-primary`` honours the ``DR_ACTIVE_PRIMARY`` override, so a
-        prolonged failover still keeps the (new) secondary a warm mirror.
+        folder. ``active-primary`` is resolved via :meth:`active_primary_key`
+        (env override > ``dr_state`` table > config role), so a persisted failover
+        keeps the (new) secondary a warm mirror across fresh job processes.
 
         Failback: secondary -> home-primary, into the ``secondary`` folder. This is
         deliberately resolved from the *config* roles (the home primary), NOT the
-        override -- failback means "return changes to the original primary" even
-        while ``DR_ACTIVE_PRIMARY`` still points at the promoted region. Restoring
-        roles (unsetting the override) is the final, separate step.
+        active role -- failback means "return changes to the original primary" even
+        while ``dr_state`` still points at the promoted region. Restoring the role
+        (failback writes ``dr_state`` back to home) is the final step.
         """
         storage = self.storage
         if failback:
@@ -140,8 +157,8 @@ class Config:
             others = [k for k in self.regions if k != home.key]
             promoted = self.regions[others[0]]
             return Direction(source=promoted, dest=home, folder=storage["secondary_folder"])
-        primary = self.regions[self.active_primary_key()]
-        secondary = self.regions[self.secondary_key()]
+        primary = self.regions[self.active_primary_key(spark)]
+        secondary = self.regions[self.secondary_key(spark)]
         return Direction(source=primary, dest=secondary, folder=storage["primary_folder"])
 
 

@@ -254,14 +254,22 @@ replication logic is duplicated; only the *direction* changes.
 `Config.direction()` decides source/dest so failover/failback never hardcode
 "west→east":
 
-- **Normal / failover sync** — `direction()` is *override-aware*: source = the
-  **active** primary (`DR_ACTIVE_PRIMARY` env, else config `role: primary`). So a
-  prolonged failover still runs CDC east→west to keep west warm.
+- **Normal / failover sync** — `direction()` resolves source = the **active**
+  primary, looked up in this order: `DR_ACTIVE_PRIMARY` env (dev/drill only) →
+  the `dr_state` control table (orchestration source of truth) → config
+  `role: primary`. So a persisted failover keeps CDC running in the right
+  direction across **fresh job processes**, not just one notebook session.
 - **Failback** — `direction(failback=True)` resolves from the **config roles**
-  (the *home* primary), **ignoring** the override. So `east → west` is correct even
-  while `DR_ACTIVE_PRIMARY=east` is still set. Restoring roles (unsetting the
-  override) is the final, separate step — which removes a classic double-inversion
-  footgun.
+  (the *home* primary), **ignoring** the active role. So `east → west` is correct
+  even while `dr_state` still says east. Resetting `dr_state` back to west is the
+  final step — done automatically by `run_failback`, removing a classic
+  double-inversion footgun.
+
+> **Why a table, not an env var.** `DR_ACTIVE_PRIMARY` only lives inside one
+> running Python process; scheduled jobs start fresh and never see it. The
+> `dr_state` table (`sql/03_state_table.sql`) is read by every job run and written
+> only by failover/failback, so the role survives. The env var remains as an
+> optional manual override for drills.
 
 ### The drill
 
@@ -271,16 +279,15 @@ flowchart TD
 
     Boom --> FO[FAILOVER — run in EAST<br/><b>notebooks/04 action=failover</b><br/>failover.py run_failover]
     FO --> FO1[No pull — east already mirrored.<br/>Scale up local endpoints,<br/>insert FAILOVER audit row]
-    FO1 --> FO2[Operator: set DR_ACTIVE_PRIMARY=east,<br/>repoint consumers to east]
+    FO1 --> FO2[run_failover persists<br/>dr_state active_primary=east.<br/>Operator repoints consumers to east]
     FO2 --> Outage[East serves;<br/>new model versions created in east]
 
     Outage --> Recover{{West region recovers}}
     Recover --> FB[FAILBACK — run in WEST<br/><b>notebooks/04 action=failback</b>]
     FB --> FB1[Reverse CDC east→west<br/>cdc.py run_cdc, direction failback=True<br/>reads dr_remote_east scope in WEST]
     FB1 --> FB2[watermark-gated pull of<br/>outage-time versions into west]
-    FB2 --> FB3[Insert FAILBACK audit row<br/>failover.py run_failback]
-    FB3 --> Restore[Operator: unset DR_ACTIVE_PRIMARY<br/>→ back to steady state]
-    Restore --> Steady
+    FB2 --> FB3[Insert FAILBACK audit row +<br/>reset dr_state active_primary=west<br/>failover.py run_failback]
+    FB3 --> Steady
 ```
 
 | Action | Run in | Pull? | Source secret scope | Audit op |
@@ -358,6 +365,10 @@ recent `FAILED` rows. On any problem it **raises** → the task fails → the jo
 # One-time auth (already done if the failover drill worked):
 databricks auth login --host https://fe-sandbox-ps-dr-wp-us-east-1.cloud.databricks.com --profile dr-east
 databricks auth login --host https://fe-sandbox-ps-dr-wp-us-west-2.cloud.databricks.com --profile dr-west
+
+# One-time: create the UC control tables (audit + dr_state) in BOTH metastores.
+# Run sql/01_uc_objects.sql, sql/02_audit_table.sql, sql/03_state_table.sql in a
+# SQL editor / notebook against west and east.
 
 # Validate + deploy the steady-state jobs to the secondary (schedules PAUSED):
 databricks bundle validate -t east
