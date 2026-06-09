@@ -61,15 +61,18 @@ from databricks.sdk import WorkspaceClient
 w = WorkspaceClient()
 for ep in w.serving_endpoints.list():
     detail = w.serving_endpoints.get(ep.name)
-    # while provisioning, served models are in pending_config (config is None).
-    conf = detail.config or detail.pending_config
+    # A config change lands in pending_config first; config keeps the OLD value
+    # until the rollout completes. Prefer pending so the verify reflects the
+    # desired posture immediately after mirror/activate.
+    conf = detail.pending_config or detail.config
     served = [(s.entity_name, s.entity_version, getattr(s, "scale_to_zero_enabled", None))
               for s in ((conf.served_entities if conf else None) or [])]
     # Skip platform Foundation Model API endpoints (no UC entity_name) — show only
     # endpoints that serve a UC model, i.e. the ones DR manages.
     if not any(e[0] for e in served):
         continue
-    print(ep.name, "ready=", bool(detail.config), served)
+    updating = bool(detail.pending_config)
+    print(ep.name, "updating=", updating, served)
 # after mirror  -> scale_to_zero_enabled = True   (standby)
 # after activate-> scale_to_zero_enabled = False  (serving)
 
