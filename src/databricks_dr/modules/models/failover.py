@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from ...common import state
 from ...common.audit import AuditRow
-from ...common.clients import is_databricks_runtime, workspace_client, workspace_client_from_creds
 from ...common.logging import get_logger
 from ...core.base import RunContext
 
@@ -95,17 +94,16 @@ def run_failback(ctx: RunContext) -> None:
 
 
 def _scale_up_endpoints(ctx: RunContext) -> None:
-    """Ensure serving endpoints in the LOCAL (dest) workspace are ready to serve.
+    """Activate the LOCAL (dest) serving endpoints for in-scope models.
 
-    Failover/failback always run in the destination workspace, so the local
-    ambient identity is the right client -- no CLI profile (absent on clusters).
-    Off-cluster it falls back to the dest CLI profile.
+    Delegates to the endpoints module, which scales the standby (scale-to-zero)
+    mirror up to an active posture. Non-fatal: a serving hiccup must not abort the
+    role flip itself -- the ENDPOINT audit rows record the outcome.
     """
     if ctx.dry_run:
         return
-    wc = workspace_client_from_creds() if is_databricks_runtime() else workspace_client(ctx.direction.dest.profile)
+    from . import endpoints
     try:
-        for ep in wc.serving_endpoints.list():
-            _logger.info("Endpoint %s present locally; ensure scale-to-zero disabled for active serving.", ep.name)
+        endpoints.activate_endpoints(ctx)
     except Exception as e:  # noqa: BLE001
-        _logger.warning("Could not enumerate local serving endpoints: %s", e)
+        _logger.warning("Endpoint activation failed (non-fatal): %s", e)

@@ -299,6 +299,22 @@ flowchart TD
 > RPO is whatever the last CDC achieved. The secondary is promoted as-is. Pulling is
 > only for failback, once the home region is healthy again.
 
+### Serving-endpoint DR
+
+Serving endpoints aren't carried by mlflow-export-import, so they're handled
+separately by `modules/models/endpoints.py` using the same cross-workspace identity
+(run in dest, read source via secret scope, apply locally):
+
+| Phase | Function | What it does |
+|---|---|---|
+| Steady state (replicate/cdc) | `mirror_endpoints` | for each in-scope model, recreate the source's endpoints on the dest in **standby** (scale-to-zero), so the route exists and is cheap |
+| Failover (`run_failover`) | `activate_endpoints` | scale the dest endpoints **up** (disable scale-to-zero) so they actively serve |
+
+Gated by `models.replicate_serving_endpoints` and non-fatal (each writes an
+`ENDPOINT` audit row). Model versions line up because the import preserves version
+numbers. The remaining manual bit is **routing consumers** to the dest endpoint URL
+(DNS/gateway), which lives outside Databricks.
+
 ---
 
 ## 10. Bidirectional secret scopes

@@ -5,7 +5,7 @@ from __future__ import annotations
 from ...common import storage
 from ...core.base import BaseDRModule
 from ...core.registry import register
-from . import baseline, cdc, dependencies, failover, grants, health, replicate, seed
+from . import baseline, cdc, dependencies, endpoints, failover, grants, health, replicate, seed
 from ._selection import resolve_models
 
 
@@ -28,14 +28,24 @@ class ModelsDRModule(BaseDRModule):
     def replicate(self) -> None:
         """Recommended: pull from remote source into local dest (one job, no bridge)."""
         replicate.run_replicate(self.ctx, full=True)
+        self._replicate_extras()
+
+    def _replicate_extras(self) -> None:
+        """Consumer-facing extras after the model versions land. All non-fatal so a
+        single hiccup never fails an otherwise-good model replication; each writes
+        its own audit row regardless."""
         if self.cfg.models.get("replicate_grants", False):
-            # Cross-workspace grants mirroring (remote-read via secret scope, local
-            # apply). Kept non-fatal so a grants hiccup never fails a good model
-            # replication; the audit table records the GRANTS row either way.
+            # Cross-workspace grants mirroring (remote-read via secret scope, local apply).
             try:
                 grants.replicate_grants(self.ctx)
             except Exception as e:  # noqa: BLE001
                 self.log.warning("Grants replication failed (non-fatal): %s", e)
+        if self.cfg.models.get("replicate_serving_endpoints", False):
+            # Mirror serving endpoints in standby (scale-to-zero); failover activates.
+            try:
+                endpoints.mirror_endpoints(self.ctx)
+            except Exception as e:  # noqa: BLE001
+                self.log.warning("Endpoint mirroring failed (non-fatal): %s", e)
 
     # Split-workflow phases (each runs in a single workspace) ------------------
     def export(self) -> None:
@@ -56,11 +66,7 @@ class ModelsDRModule(BaseDRModule):
 
     def cdc(self) -> None:
         cdc.run_cdc(self.ctx)
-        if self.cfg.models.get("replicate_grants", False):
-            try:
-                grants.replicate_grants(self.ctx)
-            except Exception as e:  # noqa: BLE001
-                self.log.warning("Grants replication failed (non-fatal): %s", e)
+        self._replicate_extras()
 
     def validate(self) -> None:
         for model in resolve_models(self.ctx.direction.source.registry_uri,
