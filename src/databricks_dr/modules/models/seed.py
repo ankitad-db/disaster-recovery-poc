@@ -34,6 +34,20 @@ def seed_primary(cfg: Config, n_versions: int = 2) -> str:
 
     _ensure_uc(cfg)
 
+    # Log to a stable Shared experiment (NOT the notebook path). A notebook-path
+    # experiment collides on import when the same Git folder exists in the
+    # destination workspace, so DR-managed models use a dedicated location.
+    experiment_path = f"/Shared/dr/experiments/{catalog}_{schema}_iris_dr_model"
+    mlflow.set_experiment(experiment_path)
+    _logger.info("Using experiment %s", experiment_path)
+
+    # Clean slate so re-seeding yields a single, consistent lineage.
+    try:
+        client.delete_registered_model(model_name)
+        _logger.info("Deleted existing registered model %s for a clean reseed", model_name)
+    except Exception as e:  # noqa: BLE001
+        _logger.info("No existing model to delete (%s)", e)
+
     X, y = load_iris(return_X_y=True, as_frame=True)
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42)
 

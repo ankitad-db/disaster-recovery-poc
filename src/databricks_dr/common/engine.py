@@ -30,6 +30,52 @@ def engine_version() -> str:
         return "unknown"
 
 
+def _ensure_json_patch() -> None:
+    """Patch the engine's JSON writer to tolerate non-serializable MLflow objects.
+
+    UC + MLflow 3 model versions carry ``model_metrics`` whose values are
+    ``mlflow.entities.Metric`` objects; the engine's ``io_utils.write_file`` calls
+    ``json.dumps`` without a ``default=`` handler and crashes with
+    "Object of type Metric is not JSON serializable". We add a tolerant encoder.
+    """
+    from mlflow_export_import.common import filesystem as _fs
+    from mlflow_export_import.common import io_utils
+
+    if getattr(io_utils, "_dr_json_patched", False):
+        return
+
+    import json as _json
+
+    import yaml as _yaml
+
+    def _default(o):
+        for attr in ("to_dictionary", "to_dict"):
+            if hasattr(o, attr):
+                try:
+                    return getattr(o, attr)()
+                except Exception:  # noqa: BLE001
+                    pass
+        if hasattr(o, "__dict__"):
+            return {k: v for k, v in vars(o).items() if not k.startswith("_")}
+        return str(o)
+
+    def write_file(path, content, file_type=None):
+        path = _fs.mk_local_path(path)
+        if path.endswith(".json"):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(_json.dumps(content, indent=2, default=_default) + "\n")
+        elif any(path.endswith(x) for x in [".yaml", ".yml"]) or file_type in ["yaml", "yml"]:
+            with open(path, "w", encoding="utf-8") as f:
+                _yaml.dump(content, f)
+        else:
+            with open(path, "wb") as f:
+                f.write(content)
+
+    io_utils.write_file = write_file
+    io_utils._dr_json_patched = True
+    _logger.info("Patched mlflow_export_import io_utils.write_file (tolerant JSON encoder)")
+
+
 # --------------------------------------------------------------------------- #
 # Bulk models (baseline)
 # --------------------------------------------------------------------------- #
@@ -57,6 +103,7 @@ def export_models(
         ]
         subprocess.run(cmd, check=True, env=env)
         return
+    _ensure_json_patch()
     from mlflow_export_import.bulk.export_models import export_models as _em
 
     _em(
@@ -79,6 +126,7 @@ def import_models(
     delete_model: bool = False,
     import_permissions: bool = True,
     import_source_tags: bool = True,
+    experiment_renames: Optional[dict] = None,
 ) -> None:
     _logger.info("import_models in=%s uri=%s delete_model=%s backend=%s", input_dir, registry_uri, delete_model, backend)
     if backend == "cli":
@@ -91,6 +139,7 @@ def import_models(
         ]
         subprocess.run(cmd, check=True, env=env)
         return
+    _ensure_json_patch()
     from mlflow_export_import.bulk.import_models import import_models as _im
 
     _im(
@@ -98,6 +147,7 @@ def import_models(
         delete_model=delete_model,
         import_permissions=import_permissions,
         import_source_tags=import_source_tags,
+        experiment_renames=experiment_renames,
         mlflow_client=make_mlflow_client(registry_uri),
     )
 

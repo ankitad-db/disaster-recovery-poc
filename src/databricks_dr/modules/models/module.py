@@ -29,7 +29,12 @@ class ModelsDRModule(BaseDRModule):
         """Recommended: pull from remote source into local dest (one job, no bridge)."""
         replicate.run_replicate(self.ctx, full=True)
         if self.cfg.models.get("replicate_grants", False):
-            grants.replicate_grants(self.ctx)
+            # Grants mirroring still uses CLI profiles and needs the cross-workspace
+            # ambient treatment; keep it non-fatal so it never fails a good replication.
+            try:
+                grants.replicate_grants(self.ctx)
+            except Exception as e:  # noqa: BLE001
+                self.log.warning("Grants replication skipped (not yet cross-workspace aware): %s", e)
 
     # Split-workflow phases (each runs in a single workspace) ------------------
     def export(self) -> None:
