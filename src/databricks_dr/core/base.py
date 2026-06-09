@@ -64,3 +64,7 @@ class BaseDRModule(ABC):
     def validate(self) -> None:
         """Verify replication fidelity on the destination."""
         self.log.info("validate() not implemented for %s", self.object_type)
+
+    def health(self) -> None:
+        """Drift/failure detection; should raise on problems so a job task fails."""
+        self.log.info("health() not implemented for %s", self.object_type)

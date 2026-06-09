@@ -1,19 +1,30 @@
-# DR jobs for the models module.
-#  - dr_models_baseline : one-off, manually triggered full export/import.
-#  - dr_models_cdc      : scheduled incremental sync (the steady-state DR engine).
+# DR jobs for the models module — the orchestration layer.
 #
-# Both run as the DR service principal (ad-dr-spn) via run_as so replication uses
-# the account-admin identity present in both workspaces.
+#  Steady state (deploy + run in the SECONDARY / us-east-1):
+#    dr_models_replicate : one-off baseline full export/import (manual).
+#    dr_models_cdc       : scheduled incremental sync THEN health check (the engine).
+#    dr_models_health    : independent scheduled drift/failure scan (safety net).
+#    dr_models_failover  : manual failover / failback (parameterised).
+#
+#  Alternative storage-bridge variant (primary exports, S3 CRR bridges, secondary
+#  imports): dr_models_export + dr_models_import.
+#
+# All jobs run as the DR service principal (ad-dr-spn) so replication uses the
+# account-admin identity present in both workspaces. Failure (and CDC success)
+# notifications go to ${var.alert_email}. Pause/cron/email are bundle variables
+# (see databricks.yml) so steady state is flipped on with a single deploy.
 
 resources:
   jobs:
-    # RECOMMENDED: single-job cross-workspace pull. Deploy + run on the SECONDARY
-    # target; it authenticates to the primary via the dr_remote_west secret scope,
-    # exports the remote registry into the local bucket, and imports locally.
+    # RECOMMENDED baseline: single-job cross-workspace pull. Run once on the
+    # SECONDARY to seed it from the primary registry via the dr_remote_west scope.
     dr_models_replicate:
-      name: "[DR] models · replicate (run in SECONDARY, pulls from primary)"
+      name: "[DR] models · replicate baseline (run in SECONDARY, pulls from primary)"
+      tags: { dr_module: models, dr_phase: baseline }
       run_as:
         service_principal_name: ad-dr-spn
+      email_notifications:
+        on_failure: ["${var.alert_email}"]
       tasks:
         - task_key: replicate
           notebook_task:
@@ -30,58 +41,29 @@ resources:
       queue:
         enabled: true
 
-    # ALTERNATIVE (storage-bridge variant): export on PRIMARY, bridge bucket
-    # (S3 CRR), then import on SECONDARY.
-    dr_models_export:
-      name: "[DR] models · baseline export (run in PRIMARY)"
-      run_as:
-        service_principal_name: ad-dr-spn
-      tasks:
-        - task_key: export
-          notebook_task:
-            notebook_path: ../notebooks/02a_export_primary.py
-          environment_key: dr_env
-      environments:
-        - environment_key: dr_env
-          spec:
-            client: "2"
-            dependencies:
-              - "git+https://github.com/mlflow/mlflow-export-import@master"
-              - -e ..
-      queue:
-        enabled: true
-
-    dr_models_import:
-      name: "[DR] models · baseline import (run in SECONDARY)"
-      run_as:
-        service_principal_name: ad-dr-spn
-      tasks:
-        - task_key: import
-          notebook_task:
-            notebook_path: ../notebooks/02b_import_secondary.py
-          environment_key: dr_env
-      environments:
-        - environment_key: dr_env
-          spec:
-            client: "2"
-            dependencies:
-              - "git+https://github.com/mlflow/mlflow-export-import@master"
-              - -e ..
-      queue:
-        enabled: true
-
+    # STEADY-STATE ENGINE: incremental CDC, then a health check that fails the run
+    # (and notifies) on any drift. Unpause after a clean baseline + manual dry run.
     dr_models_cdc:
-      name: "[DR] models · incremental CDC"
+      name: "[DR] models · CDC + health (scheduled)"
+      tags: { dr_module: models, dr_phase: cdc }
       run_as:
         service_principal_name: ad-dr-spn
       schedule:
         quartz_cron_expression: ${var.cdc_schedule_cron}
         timezone_id: UTC
-        pause_status: PAUSED        # unpause after baseline + a clean dry run
+        pause_status: ${var.cdc_pause_status}
+      email_notifications:
+        on_failure: ["${var.alert_email}"]
       tasks:
         - task_key: cdc
           notebook_task:
             notebook_path: ../notebooks/03_cdc.py
+          environment_key: dr_env
+        - task_key: health_check
+          depends_on:
+            - task_key: cdc
+          notebook_task:
+            notebook_path: ../notebooks/05_health_check.py
           environment_key: dr_env
       environments:
         - environment_key: dr_env
@@ -94,10 +76,45 @@ resources:
       queue:
         enabled: true
 
-    dr_models_failover:
-      name: "[DR] models · failover / failback (manual)"
+    # SAFETY NET: independent health scan on its own cadence. Catches drift even if
+    # a CDC run never fired (e.g. cluster/quota outage), since it checks the audit
+    # table watermark + dest registry directly.
+    dr_models_health:
+      name: "[DR] models · health scan (scheduled)"
+      tags: { dr_module: models, dr_phase: health }
       run_as:
         service_principal_name: ad-dr-spn
+      schedule:
+        quartz_cron_expression: ${var.health_schedule_cron}
+        timezone_id: UTC
+        pause_status: ${var.cdc_pause_status}
+      email_notifications:
+        on_failure: ["${var.alert_email}"]
+      tasks:
+        - task_key: health_check
+          notebook_task:
+            notebook_path: ../notebooks/05_health_check.py
+          environment_key: dr_env
+      environments:
+        - environment_key: dr_env
+          spec:
+            client: "2"
+            dependencies:
+              - "git+https://github.com/mlflow/mlflow-export-import@master"
+              - -e ..
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+
+    # Manual failover / failback. action=failover (run in EAST) | failback (run in WEST).
+    dr_models_failover:
+      name: "[DR] models · failover / failback (manual)"
+      tags: { dr_module: models, dr_phase: failover }
+      run_as:
+        service_principal_name: ad-dr-spn
+      email_notifications:
+        on_failure: ["${var.alert_email}"]
+        on_success: ["${var.alert_email}"]
       parameters:
         - name: action
           default: failover
@@ -115,3 +132,49 @@ resources:
             dependencies:
               - "git+https://github.com/mlflow/mlflow-export-import@master"
               - -e ..
+
+    # ALTERNATIVE (storage-bridge variant): export on PRIMARY, bridge bucket
+    # (S3 CRR), then import on SECONDARY.
+    dr_models_export:
+      name: "[DR] models · baseline export (run in PRIMARY)"
+      tags: { dr_module: models, dr_phase: export }
+      run_as:
+        service_principal_name: ad-dr-spn
+      email_notifications:
+        on_failure: ["${var.alert_email}"]
+      tasks:
+        - task_key: export
+          notebook_task:
+            notebook_path: ../notebooks/02a_export_primary.py
+          environment_key: dr_env
+      environments:
+        - environment_key: dr_env
+          spec:
+            client: "2"
+            dependencies:
+              - "git+https://github.com/mlflow/mlflow-export-import@master"
+              - -e ..
+      queue:
+        enabled: true
+
+    dr_models_import:
+      name: "[DR] models · baseline import (run in SECONDARY)"
+      tags: { dr_module: models, dr_phase: import }
+      run_as:
+        service_principal_name: ad-dr-spn
+      email_notifications:
+        on_failure: ["${var.alert_email}"]
+      tasks:
+        - task_key: import
+          notebook_task:
+            notebook_path: ../notebooks/02b_import_secondary.py
+          environment_key: dr_env
+      environments:
+        - environment_key: dr_env
+          spec:
+            client: "2"
+            dependencies:
+              - "git+https://github.com/mlflow/mlflow-export-import@master"
+              - -e ..
+      queue:
+        enabled: true

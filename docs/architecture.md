@@ -319,8 +319,64 @@ Both scope names/keys are configured in `config/dr_config.yaml` under `secrets:`
 
 ---
 
-## 11. Production hardening (no architecture change)
+## 11. Orchestration (Asset Bundle)
+
+Everything you ran by hand is wired into Databricks Workflows via the Asset Bundle
+(`databricks.yml` + `resources/dr_models_jobs.yml`). The jobs run as `ad-dr-spn`
+and notify `${var.alert_email}` on failure. The steady-state jobs live in the
+**secondary** (east), because the pull always runs in the destination.
+
+| Job | Cadence | Tasks | Purpose |
+|---|---|---|---|
+| `dr_models_replicate` | manual | `replicate` | one-off baseline (seed east from west) |
+| `dr_models_cdc` | `${cdc_schedule_cron}` (15 min) | `cdc` → `health_check` | steady-state engine: incremental sync, then fail-loud validation |
+| `dr_models_health` | `${health_schedule_cron}` (hourly) | `health_check` | safety net — catches drift even if a CDC run never fired |
+| `dr_models_failover` | manual (`--action`) | `failover` | failover / failback drill |
+
+```mermaid
+flowchart LR
+    subgraph east["SECONDARY (us-east-1) — bundle target: east"]
+      SCH[schedule<br/>every 15 min] --> CDC[task: cdc<br/>03_cdc.py]
+      CDC --> HC[task: health_check<br/>05_health_check.py]
+      HC -->|drift / FAILED rows| ALERT[email alert<br/>${alert_email}]
+      HSCH[schedule<br/>hourly] --> HC2[dr_models_health<br/>05_health_check.py]
+      HC2 -->|drift| ALERT
+    end
+    HC --> AUD[(audit table<br/>HEALTH row)]
+    HC2 --> AUD
+```
+
+**The `health_check` task is what replaces your manual validation.** For every
+in-scope model it confirms the dest registry is present and at/above its audit
+watermark, checks replication lag vs the source, and scans the audit table for
+recent `FAILED` rows. On any problem it **raises** → the task fails → the job's
+`on_failure` email fires, and a `HEALTH`/`FAILED` row lands in the audit table.
+
+### Deploy + go live
+
+```bash
+# One-time auth (already done if the failover drill worked):
+databricks auth login --host https://fe-sandbox-ps-dr-wp-us-east-1.cloud.databricks.com --profile dr-east
+databricks auth login --host https://fe-sandbox-ps-dr-wp-us-west-2.cloud.databricks.com --profile dr-west
+
+# Validate + deploy the steady-state jobs to the secondary (schedules PAUSED):
+databricks bundle validate -t east
+databricks bundle deploy   -t east
+
+# Baseline once, confirm it's clean, then flip schedules on:
+databricks bundle run dr_models_replicate -t east
+databricks bundle deploy -t east --var cdc_pause_status=UNPAUSED   # CDC + health now scheduled
+
+# Failback jobs (deploy to the home primary so they exist when needed):
+databricks bundle deploy -t west
+```
+
+Override the alert address per deploy with `--var alert_email=you@databricks.com`.
+
+---
+
+## 12. Production hardening (no architecture change)
 
 - Replace the secret-scope PAT with a **service principal OAuth (M2M)** token; rotate it.
-- **Schedule** the CDC job (sets RPO) and alert on `FAILED` audit rows.
+- Schedules + failure alerts are already wired (§11); tune `cdc_schedule_cron` to your RPO.
 - Ensure the SPN has UC read in primary and write in secondary (and the reverse for failback).

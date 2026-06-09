@@ -22,7 +22,7 @@ _logger = get_logger(__name__)
 
 @dataclass
 class AuditRow:
-    operation: str  # EXPORT|IMPORT|VERIFY|GRANTS|ENDPOINT|DEPENDENCY|FAILOVER|FAILBACK
+    operation: str  # EXPORT|IMPORT|VERIFY|GRANTS|ENDPOINT|DEPENDENCY|FAILOVER|FAILBACK|HEALTH
     direction: str  # e.g. us-west-2->us-east-1
     model_name: str
     status: str = "IN_PROGRESS"  # IN_PROGRESS|SUCCESS|FAILED|SKIPPED
@@ -113,6 +113,21 @@ class AuditLog:
         wm = _extract_scalar(res)
         return int(wm) if wm is not None else 0
 
+    def recent_failures(self, hours: int = 24) -> list[dict]:
+        """FAILED audit rows in the last ``hours`` (newest first).
+
+        Used by the health-check task to fail the orchestrating job (and fire
+        notifications) when any replication step errored recently.
+        """
+        cols = ["event_time", "operation", "direction", "model_name", "error_message"]
+        sql = (
+            f"SELECT {', '.join(cols)} FROM {self.table} "
+            f"WHERE status = 'FAILED' "
+            f"AND event_time >= current_timestamp() - INTERVAL {int(hours)} HOURS "
+            f"ORDER BY event_time DESC"
+        )
+        return _extract_rows(self._execute(sql), cols)
+
 
 def _extract_scalar(res) -> Optional[int]:
     """Best-effort scalar extraction across spark DataFrame and SDK responses."""
@@ -132,3 +147,16 @@ def _extract_scalar(res) -> Optional[int]:
     except (AttributeError, IndexError, TypeError):
         pass
     return None
+
+
+def _extract_rows(res, columns: list[str]) -> list[dict]:
+    """Best-effort row extraction across spark DataFrame and SDK responses."""
+    if res is None:
+        return []
+    if hasattr(res, "collect"):  # Spark DataFrame
+        return [r.asDict() for r in res.collect()]
+    try:  # Databricks SDK StatementResponse
+        data = res.result.data_array or []
+        return [dict(zip(columns, row)) for row in data]
+    except (AttributeError, TypeError):
+        return []

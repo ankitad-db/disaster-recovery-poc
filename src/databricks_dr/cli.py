@@ -28,6 +28,7 @@ _ACTIONS = {
     "failover": "failover",
     "failback": "failback",
     "validate": "validate",
+    "health": "health",
 }
 
 

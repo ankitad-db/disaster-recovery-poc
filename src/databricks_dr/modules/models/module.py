@@ -5,7 +5,7 @@ from __future__ import annotations
 from ...common import storage
 from ...core.base import BaseDRModule
 from ...core.registry import register
-from . import baseline, cdc, dependencies, failover, grants, replicate, seed
+from . import baseline, cdc, dependencies, failover, grants, health, replicate, seed
 from ._selection import resolve_models
 
 
@@ -67,6 +67,10 @@ class ModelsDRModule(BaseDRModule):
                                     self.cfg.models.get("include", [])):
             dependencies.replicate_dependencies(self.ctx, model)
         self.log.info("Validation/dependency pass complete.")
+
+    def health(self) -> None:
+        """Drift/failure detection. Raises (fails the job) on any problem."""
+        health.run_health_check(self.ctx)
 
     def failover(self) -> None:
         failover.run_failover(self.ctx)
