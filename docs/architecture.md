@@ -355,7 +355,9 @@ and notify `${var.alert_email}` on failure. The steady-state jobs live in the
 | `dr_models_replicate` | manual | `replicate` | one-off baseline (seed east from west) |
 | `dr_models_cdc` | `${cdc_schedule_cron}` (15 min) | `cdc` → `health_check` | steady-state engine: incremental sync, then fail-loud validation |
 | `dr_models_health` | `${health_schedule_cron}` (hourly) | `health_check` | safety net — catches drift even if a CDC run never fired |
-| `dr_models_failover` | manual (`--action`) | `failover` | failover / failback drill |
+| `dr_models_failover` | manual (`--action`) | `failover` | failover / failback (production action) |
+| `dr_models_drill_failover` | manual (EAST) | `drill_failover` | self-asserting failover drill (baseline→failover→simulate version) |
+| `dr_models_drill_failback` | manual (WEST) | `drill_failback` | self-asserting failback drill (reverse CDC→failback→verify) |
 
 ```mermaid
 flowchart LR

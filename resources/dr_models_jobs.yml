@@ -155,6 +155,54 @@ resources:
               - "git+https://github.com/mlflow/mlflow-export-import@master"
               - -e ..
 
+    # DRILL: self-asserting failover/failback test. Two jobs because the drill is
+    # inherently two-sided -- failover runs in EAST, failback in WEST. Each raises
+    # on failure so a red run = drill failed.
+    dr_models_drill_failover:
+      name: "[DR] models · DRILL failover (run in EAST)"
+      tags: { dr_module: models, dr_phase: drill }
+      run_as:
+        service_principal_name: ad-dr-spn
+      email_notifications:
+        on_failure: ["${var.alert_email}"]
+      tasks:
+        - task_key: drill_failover
+          notebook_task:
+            notebook_path: ../notebooks/drill_failover.py
+          environment_key: dr_env
+      environments:
+        - environment_key: dr_env
+          spec:
+            client: "2"
+            dependencies:
+              - scikit-learn
+              - "git+https://github.com/mlflow/mlflow-export-import@master"
+              - -e ..
+      queue:
+        enabled: true
+
+    dr_models_drill_failback:
+      name: "[DR] models · DRILL failback (run in WEST)"
+      tags: { dr_module: models, dr_phase: drill }
+      run_as:
+        service_principal_name: ad-dr-spn
+      email_notifications:
+        on_failure: ["${var.alert_email}"]
+      tasks:
+        - task_key: drill_failback
+          notebook_task:
+            notebook_path: ../notebooks/drill_failback.py
+          environment_key: dr_env
+      environments:
+        - environment_key: dr_env
+          spec:
+            client: "2"
+            dependencies:
+              - "git+https://github.com/mlflow/mlflow-export-import@master"
+              - -e ..
+      queue:
+        enabled: true
+
     # ALTERNATIVE (storage-bridge variant): export on PRIMARY, bridge bucket
     # (S3 CRR), then import on SECONDARY.
     dr_models_export:
