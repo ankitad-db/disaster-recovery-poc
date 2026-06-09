@@ -82,6 +82,11 @@ def run_replicate(
 ) -> None:
     """Pull models from the remote source and import into the local dest.
 
+    Per-model single export/import (not the bulk path): the single importer
+    materializes MLflow 3.x logged models before registering each version, and
+    surfaces real errors. Every import is verified against the source version set,
+    so a partial/silent import is recorded as FAILED rather than SUCCESS.
+
     ``models_override`` lets CDC replicate only the models that changed; when None
     the full in-scope set is resolved on the source.
     """
@@ -90,75 +95,115 @@ def run_replicate(
 
     ts = storage.new_timestamp()
     rel = storage.rel_export_dir(cfg, direction, ts)
-    out_dir = storage.dbfs_path(rel)  # local (destination) DBFS bucket
+    base_out = storage.dbfs_path(rel)  # local (destination) DBFS bucket
+    exp_base = cfg.models.get("dest_experiment_base", "/Shared/dr/experiments")
+    export_version_model = cfg.models.get("export_version_model", True)
+    export_permissions = cfg.models.get("export_permissions", True)
 
     # --- EXPORT phase: become the remote source ---
-    erow = AuditRow(
-        operation="EXPORT", direction=direction.label, model_name="(scope)",
-        triggered_by=ctx.triggered_by, export_dir=out_dir, tool_version=engine.engine_version(),
-        actor=cfg.service_principal,
-    )
-    audit.insert(erow)
-    t0 = time.time()
-    try:
-        with _ambient_identity(host, token):
-            models = models_override or resolve_models(LOCAL_REGISTRY, cfg.models.get("include", []))
-            if not models:
-                raise ValueError("No models in scope on source (config models.include is empty)")
-            models_csv = ",".join(models)
-            if not ctx.dry_run:
-                engine.export_models(
-                    models=models_csv, output_dir=out_dir, registry_uri=LOCAL_REGISTRY,
-                    backend=cfg.engine_backend,
-                    export_all_runs=full and cfg.models.get("export_all_runs_on_baseline", True),
-                    export_version_model=cfg.models.get("export_version_model", True),
-                    export_permissions=cfg.models.get("export_permissions", True),
+    src_versions: dict[str, list[int]] = {}
+    with _ambient_identity(host, token):
+        models = models_override or resolve_models(LOCAL_REGISTRY, cfg.models.get("include", []))
+        if not models:
+            raise ValueError("No models in scope on source (config models.include is empty)")
+        for model in models:
+            out_dir = f"{base_out}/models/{model}"
+            erow = AuditRow(
+                operation="EXPORT", direction=direction.label, model_name=model,
+                triggered_by=ctx.triggered_by, export_dir=out_dir,
+                tool_version=engine.engine_version(), actor=cfg.service_principal,
+            )
+            audit.insert(erow)
+            t0 = time.time()
+            try:
+                if not ctx.dry_run:
+                    engine.export_model(
+                        model=model, output_dir=out_dir, registry_uri=LOCAL_REGISTRY,
+                        backend=cfg.engine_backend,
+                        export_version_model=export_version_model,
+                        export_permissions=export_permissions,
+                    )
+                    src_versions[model] = _list_versions(LOCAL_REGISTRY, model)
+                audit.update_status(
+                    erow.audit_id, "SUCCESS",
+                    source_version=_max_str(src_versions.get(model)),
+                    artifact_count=len(src_versions.get(model, [])),
+                    duration_sec=round(time.time() - t0, 2),
                 )
-        audit.update_status(erow.audit_id, "SUCCESS", model_name=models_csv,
-                            duration_sec=round(time.time() - t0, 2),
-                            manifest_path=f"{out_dir}/manifest.json")
-    except Exception as e:  # noqa: BLE001
-        audit.update_status(erow.audit_id, "FAILED", error_message=str(e))
-        raise
+            except Exception as e:  # noqa: BLE001
+                audit.update_status(erow.audit_id, "FAILED", error_message=str(e))
+                raise
 
     # --- IMPORT phase: restore local identity, import into local registry ---
-    irow = AuditRow(
-        operation="IMPORT", direction=direction.label, model_name=models_csv,
-        triggered_by=ctx.triggered_by, export_dir=out_dir, tool_version=engine.engine_version(),
-        actor=cfg.service_principal,
-    )
-    audit.insert(irow)
-    t1 = time.time()
-    try:
-        with _ambient_identity(None, None):  # local runtime identity (destination)
-            if not ctx.dry_run:
-                engine.import_models(
-                    input_dir=out_dir, registry_uri=LOCAL_REGISTRY, backend=cfg.engine_backend,
-                    delete_model=delete_model,
-                    import_permissions=cfg.models.get("export_permissions", True),
-                    import_source_tags=True,
-                    experiment_renames=_experiment_renames(cfg),
+    with _ambient_identity(None, None):  # local runtime identity (destination)
+        if not ctx.dry_run:
+            _ensure_workspace_dir(exp_base)
+        for model in models:
+            in_dir = f"{base_out}/models/{model}"
+            exp_name = f"{exp_base}/{model.replace('.', '_')}"
+            irow = AuditRow(
+                operation="IMPORT", direction=direction.label, model_name=model,
+                triggered_by=ctx.triggered_by, export_dir=in_dir,
+                experiment_name=exp_name, source_version=_max_str(src_versions.get(model)),
+                tool_version=engine.engine_version(), actor=cfg.service_principal,
+            )
+            audit.insert(irow)
+            t1 = time.time()
+            try:
+                if not ctx.dry_run:
+                    engine.import_model(
+                        model=model, input_dir=in_dir, experiment_name=exp_name,
+                        registry_uri=LOCAL_REGISTRY, backend=cfg.engine_backend,
+                        delete_model=delete_model,
+                        import_permissions=export_permissions,
+                        import_source_tags=True,
+                    )
+                    _verify_import(model, src_versions.get(model, []))
+                    dst = _list_versions(LOCAL_REGISTRY, model)
+                else:
+                    dst = []
+                audit.update_status(
+                    irow.audit_id, "SUCCESS", target_version=_max_str(dst),
+                    artifact_count=len(dst), duration_sec=round(time.time() - t1, 2),
                 )
-        audit.update_status(irow.audit_id, "SUCCESS", duration_sec=round(time.time() - t1, 2))
-    except Exception as e:  # noqa: BLE001
-        audit.update_status(irow.audit_id, "FAILED", error_message=str(e))
-        raise
+            except Exception as e:  # noqa: BLE001
+                audit.update_status(irow.audit_id, "FAILED", error_message=str(e))
+                raise
 
 
-def _experiment_renames(cfg) -> dict | None:
-    """Optional remap of source experiment paths to a DR-safe base on import.
+def _list_versions(registry_uri: str, model: str) -> list[int]:
+    from ...common.clients import make_mlflow_client
 
-    Set ``models.dest_experiment_base`` (e.g. ``/Shared/dr/experiments``) in config
-    to avoid collisions when a source experiment's path also exists as a notebook
-    in the destination (common when the same Git folder is cloned in both).
+    client = make_mlflow_client(registry_uri)
+    return sorted(int(v.version) for v in client.search_model_versions(f"name='{model}'"))
+
+
+def _max_str(versions: list[int] | None) -> str | None:
+    return str(max(versions)) if versions else None
+
+
+def _verify_import(model: str, expected: list[int]) -> None:
+    """Fail loudly if the destination registry is missing expected versions.
+
+    The engine's importer can swallow per-version errors; this guarantees an
+    incomplete import is never recorded as SUCCESS.
     """
-    base = cfg.models.get("dest_experiment_base")
-    if not base:
-        return None
-    # rename_utils supports a {old: new} dict; we map by basename at import time
-    # via a callable-like dict is not supported, so callers that need exact control
-    # should pre-list experiments. For the common single-experiment POC, map below.
-    names = cfg.models.get("source_experiments", [])
-    if not names:
-        return None
-    return {n: f"{base}/{n.rstrip('/').split('/')[-1]}" for n in names}
+    dst = set(_list_versions(LOCAL_REGISTRY, model))
+    missing = sorted(set(expected) - dst)
+    if missing:
+        raise RuntimeError(
+            f"Import incomplete for '{model}': missing versions {missing} "
+            f"(dest has {sorted(dst)}, expected {sorted(expected)})"
+        )
+
+
+def _ensure_workspace_dir(path: str) -> None:
+    """Create a workspace directory (and parents) for the import experiment base."""
+    try:
+        from databricks.sdk import WorkspaceClient
+
+        WorkspaceClient().workspace.mkdirs(path)
+    except Exception as e:  # noqa: BLE001 - best effort; import will surface real errors
+        import logging
+
+        logging.getLogger(__name__).warning("Could not mkdirs '%s': %s", path, e)

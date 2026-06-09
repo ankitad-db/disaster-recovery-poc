@@ -153,7 +153,97 @@ def import_models(
 
 
 # --------------------------------------------------------------------------- #
-# Single model version (CDC)
+# Single registered model (recommended replicate/CDC path)
+# --------------------------------------------------------------------------- #
+def export_model(
+    model: str,
+    output_dir: str,
+    registry_uri: str,
+    *,
+    backend: str = "api",
+    export_version_model: bool = True,
+    export_permissions: bool = True,
+    notebook_formats: str = "SOURCE",
+) -> None:
+    """Export one registered model with all versions, runs and (3.x) logged models.
+
+    Unlike the bulk exporter this co-locates each version's run under the model's
+    own directory, which the single importer needs to materialize MLflow 3 logged
+    models before registering the version.
+    """
+    _logger.info("export_model model=%s out=%s uri=%s", model, output_dir, registry_uri)
+    if backend == "cli":
+        env = {**os.environ, "MLFLOW_TRACKING_URI": registry_uri}
+        cmd = [
+            "export-model", "--model", model, "--output-dir", output_dir,
+            "--export-latest-versions", "False",
+            "--export-version-model", str(export_version_model),
+            "--export-permissions", str(export_permissions),
+            "--notebook-formats", notebook_formats,
+        ]
+        subprocess.run(cmd, check=True, env=env)
+        return
+    _ensure_json_patch()
+    from mlflow_export_import.model.export_model import export_model as _em
+
+    ok, _ = _em(
+        model_name=model,
+        output_dir=output_dir,
+        export_latest_versions=False,
+        export_version_model=export_version_model,
+        export_permissions=export_permissions,
+        notebook_formats=_fmt_list(notebook_formats),
+        mlflow_client=make_mlflow_client(registry_uri),
+    )
+    if not ok:
+        raise RuntimeError(f"export_model failed for '{model}' (see engine logs)")
+
+
+def import_model(
+    model: str,
+    input_dir: str,
+    experiment_name: str,
+    registry_uri: str,
+    *,
+    backend: str = "api",
+    delete_model: bool = True,
+    import_permissions: bool = True,
+    import_source_tags: bool = True,
+) -> None:
+    """Import one registered model (versions + runs + logged models) into the dest.
+
+    Uses the single-model ``ModelImporter`` whose per-version run import calls
+    ``import_logged_model`` (required for MLflow 3.x logged models). Non-REST
+    errors propagate so a real failure is never masked as success.
+    """
+    _logger.info("import_model model=%s in=%s exp=%s delete=%s", model, input_dir, experiment_name, delete_model)
+    if backend == "cli":
+        env = {**os.environ, "MLFLOW_TRACKING_URI": registry_uri}
+        cmd = [
+            "import-model", "--model", model, "--input-dir", input_dir,
+            "--experiment-name", experiment_name,
+            "--delete-model", str(delete_model),
+            "--import-permissions", str(import_permissions),
+            "--import-source-tags", str(import_source_tags),
+        ]
+        subprocess.run(cmd, check=True, env=env)
+        return
+    _ensure_json_patch()
+    from mlflow_export_import.model.import_model import import_model as _im
+
+    _im(
+        model_name=model,
+        experiment_name=experiment_name,
+        input_dir=input_dir,
+        delete_model=delete_model,
+        import_permissions=import_permissions,
+        import_source_tags=import_source_tags,
+        mlflow_client=make_mlflow_client(registry_uri),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Single model version (low-level)
 # --------------------------------------------------------------------------- #
 def export_model_version(
     model: str,

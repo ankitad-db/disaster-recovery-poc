@@ -67,6 +67,9 @@ models:
   export_all_runs_on_baseline: true
   export_version_model: true
   export_permissions: true
+  # Destination experiment parent for imported version runs (avoids notebook-path
+  # collisions; per-model child = <base>/<model name with dots->underscores>).
+  dest_experiment_base: /Shared/dr/experiments
   # Consumer-facing extras
   replicate_grants: true
   replicate_serving_endpoints: true
