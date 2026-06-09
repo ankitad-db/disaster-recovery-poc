@@ -208,7 +208,7 @@ def import_model(
     backend: str = "api",
     delete_model: bool = True,
     import_permissions: bool = True,
-    import_source_tags: bool = True,
+    import_source_tags: bool = False,
 ) -> None:
     """Import one registered model (versions + runs + logged models) into the dest.
 

@@ -156,7 +156,10 @@ def run_replicate(
                         registry_uri=LOCAL_REGISTRY, backend=cfg.engine_backend,
                         delete_model=delete_model,
                         import_permissions=export_permissions,
-                        import_source_tags=True,
+                        # UC forbids '.' in model-version tag keys; the engine's
+                        # source tags (mlflow_exim.field.*) violate that and make
+                        # create_model_version 400. Provenance lives in the audit table.
+                        import_source_tags=False,
                     )
                     _verify_import(model, src_versions.get(model, []))
                     dst = _list_versions(LOCAL_REGISTRY, model)
