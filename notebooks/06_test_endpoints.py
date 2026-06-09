@@ -61,9 +61,11 @@ from databricks.sdk import WorkspaceClient
 w = WorkspaceClient()
 for ep in w.serving_endpoints.list():
     detail = w.serving_endpoints.get(ep.name)
+    # while provisioning, served models are in pending_config (config is None).
+    conf = detail.config or detail.pending_config
     served = [(s.entity_name, s.entity_version, getattr(s, "scale_to_zero_enabled", None))
-              for s in (detail.config.served_entities or [])]
-    print(ep.name, "state=", getattr(detail, "state", None), served)
+              for s in ((conf.served_entities if conf else None) or [])]
+    print(ep.name, "ready=", bool(detail.config), "state=", getattr(detail, "state", None), served)
 # after mirror  -> scale_to_zero_enabled = True   (standby)
 # after activate-> scale_to_zero_enabled = False  (serving)
 
