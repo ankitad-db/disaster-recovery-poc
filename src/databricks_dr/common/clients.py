@@ -96,3 +96,20 @@ def workspace_client(profile: str):
 
     _logger.debug("Creating WorkspaceClient profile=%s", profile)
     return WorkspaceClient(profile=profile)
+
+
+def workspace_client_from_creds(host: str | None = None, token: str | None = None):
+    """WorkspaceClient from explicit creds, or the ambient runtime identity.
+
+    Used for cross-workspace SDK calls (grants, serving endpoints) from a job that
+    runs in the LOCAL workspace: pass the remote secret-scope host+token for the
+    *source* workspace, or call with no args for the *local* (dest) ambient
+    identity. Mirrors the env-based identity switch used in ``replicate``.
+    """
+    from databricks.sdk import WorkspaceClient
+
+    if host and token:
+        _logger.debug("Creating WorkspaceClient from explicit creds host=%s", host)
+        return WorkspaceClient(host=host, token=token)
+    _logger.debug("Creating WorkspaceClient from ambient runtime identity")
+    return WorkspaceClient()
