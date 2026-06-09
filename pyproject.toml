@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "databricks-dr"
+version = "0.1.0"
+description = "Disaster Recovery framework for unsupported Databricks resources. First module: Unity Catalog models."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+authors = [{ name = "Ankita Darekar" }]
+dependencies = [
+    "mlflow>=2.16",
+    "databricks-sdk>=0.30",
+    "PyYAML>=6.0",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+# The replication engine. Pinned by commit for reproducibility.
+# Installed separately so it is never committed to this repo:
+#   pip install "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import@master"
+engine = [
+    "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import@master",
+]
+dev = [
+    "pytest>=7",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+databricks-dr = "databricks_dr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"

@@ -1,0 +1,31 @@
+# Third-party engine clone (kept locally for reference, never committed)
+vendor/
+mlflow/
+mlflow-export-import/
+
+# Secrets / local env
+.env
+*.pem
+*.token
+
+# Local export/backup dirs
+exports/
+dr_backup/
+out/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.ruff_cache/
+.pytest_cache/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/

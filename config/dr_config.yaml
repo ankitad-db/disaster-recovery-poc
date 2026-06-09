@@ -1,0 +1,57 @@
+# Databricks DR configuration.
+# Two cross-region workspaces in (separate) Databricks accounts.
+
+regions:
+  west:
+    role: primary            # primary | secondary (active role; flipped on failover)
+    region: us-west-2
+    profile: dr-west         # databricks CLI profile / MLflow registry suffix
+    registry_uri: databricks-uc://dr-west
+    host: https://fe-sandbox-ps-dr-wp-us-west-2.cloud.databricks.com
+    metastore: ad-dr-metastore-us-west-2
+    workspace: fe-sandbox-ps-dr-wp-us-west-2
+    dbfs_bucket: ps-dr-wp-us-west-2-us-west-2-dbfs-bucket--xmsr4h
+  east:
+    role: secondary
+    region: us-east-1
+    profile: dr-east
+    registry_uri: databricks-uc://dr-east
+    host: https://fe-sandbox-ps-dr-wp-us-east-1.cloud.databricks.com
+    metastore: ad-dr-metastore-us-east-1
+    workspace: fe-sandbox-ps-dr-wp-us-east-1
+    dbfs_bucket: ps-dr-wp-us-east-1-us-east-1-dbfs-bucket--s7yhiv
+
+# Identity used for replication (account admin SPN, present in both workspaces).
+service_principal: ad-dr-spn
+
+# Unity Catalog naming, mirrored in BOTH metastores.
+uc:
+  catalog: dr_poc
+  schema: ml
+  control_schema: dr_control          # audit table lives here
+  audit_table: dr_poc.dr_control.dr_replication_audit
+
+# Storage layout on the DBFS root buckets (folders auto-created on first write).
+storage:
+  base_path: dr                       # /dbfs/dr/...
+  primary_folder: primary             # west-authored exports (west -> east)
+  secondary_folder: secondary         # east-authored exports (failback east -> west)
+  latest_pointer: _latest.txt
+  bridge: sync                        # sync (aws s3 sync) | crr (rely on S3 CRR)
+
+# Engine adapter backend: api (in-process) | cli (subprocess).
+engine:
+  backend: api
+
+# Models module scope.
+models:
+  # Names or prefixes to replicate. Use "all" for everything.
+  include:
+    - dr_poc.ml.iris_dr_model
+  export_all_runs_on_baseline: true
+  export_version_model: true
+  export_permissions: true
+  # Consumer-facing extras
+  replicate_grants: true
+  replicate_serving_endpoints: true
+  consumer_group: dr_consumers

@@ -1,0 +1,73 @@
+# DR jobs for the models module.
+#  - dr_models_baseline : one-off, manually triggered full export/import.
+#  - dr_models_cdc      : scheduled incremental sync (the steady-state DR engine).
+#
+# Both run as the DR service principal (ad-dr-spn) via run_as so replication uses
+# the account-admin identity present in both workspaces.
+
+resources:
+  jobs:
+    dr_models_baseline:
+      name: "[DR] models · baseline (full export/import)"
+      run_as:
+        service_principal_name: ad-dr-spn
+      tasks:
+        - task_key: baseline
+          notebook_task:
+            notebook_path: ../notebooks/02_baseline.py
+          environment_key: dr_env
+      environments:
+        - environment_key: dr_env
+          spec:
+            client: "2"
+            dependencies:
+              - "git+https://github.com/mlflow/mlflow-export-import@master"
+              - -e ..
+      queue:
+        enabled: true
+
+    dr_models_cdc:
+      name: "[DR] models · incremental CDC"
+      run_as:
+        service_principal_name: ad-dr-spn
+      schedule:
+        quartz_cron_expression: ${var.cdc_schedule_cron}
+        timezone_id: UTC
+        pause_status: PAUSED        # unpause after baseline + a clean dry run
+      tasks:
+        - task_key: cdc
+          notebook_task:
+            notebook_path: ../notebooks/03_cdc.py
+          environment_key: dr_env
+      environments:
+        - environment_key: dr_env
+          spec:
+            client: "2"
+            dependencies:
+              - "git+https://github.com/mlflow/mlflow-export-import@master"
+              - -e ..
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+
+    dr_models_failover:
+      name: "[DR] models · failover / failback (manual)"
+      run_as:
+        service_principal_name: ad-dr-spn
+      parameters:
+        - name: action
+          default: failover
+      tasks:
+        - task_key: failover
+          notebook_task:
+            notebook_path: ../notebooks/04_failover_failback.py
+            base_parameters:
+              action: "{{job.parameters.action}}"
+          environment_key: dr_env
+      environments:
+        - environment_key: dr_env
+          spec:
+            client: "2"
+            dependencies:
+              - "git+https://github.com/mlflow/mlflow-export-import@master"
+              - -e ..
