@@ -351,6 +351,7 @@ and notify `${var.alert_email}` on failure. The steady-state jobs live in the
 
 | Job | Cadence | Tasks | Purpose |
 |---|---|---|---|
+| `dr_models_bootstrap` | manual (once/region) | `setup` | create UC control tables (audit + `dr_state`) in the local metastore |
 | `dr_models_replicate` | manual | `replicate` | one-off baseline (seed east from west) |
 | `dr_models_cdc` | `${cdc_schedule_cron}` (15 min) | `cdc` → `health_check` | steady-state engine: incremental sync, then fail-loud validation |
 | `dr_models_health` | `${health_schedule_cron}` (hourly) | `health_check` | safety net — catches drift even if a CDC run never fired |
@@ -382,20 +383,18 @@ recent `FAILED` rows. On any problem it **raises** → the task fails → the jo
 databricks auth login --host https://fe-sandbox-ps-dr-wp-us-east-1.cloud.databricks.com --profile dr-east
 databricks auth login --host https://fe-sandbox-ps-dr-wp-us-west-2.cloud.databricks.com --profile dr-west
 
-# One-time: create the UC control tables (audit + dr_state) in BOTH metastores.
-# Run sql/01_uc_objects.sql, sql/02_audit_table.sql, sql/03_state_table.sql in a
-# SQL editor / notebook against west and east.
-
-# Validate + deploy the steady-state jobs to the secondary (schedules PAUSED):
+# Validate + deploy to BOTH workspaces (schedules deploy PAUSED):
 databricks bundle validate -t east
 databricks bundle deploy   -t east
+databricks bundle deploy   -t west   # so failback + bootstrap jobs exist there too
+
+# One-time: create the UC control tables (audit + dr_state) in BOTH metastores.
+databricks bundle run dr_models_bootstrap -t east
+databricks bundle run dr_models_bootstrap -t west
 
 # Baseline once, confirm it's clean, then flip schedules on:
 databricks bundle run dr_models_replicate -t east
 databricks bundle deploy -t east --var cdc_pause_status=UNPAUSED   # CDC + health now scheduled
-
-# Failback jobs (deploy to the home primary so they exist when needed):
-databricks bundle deploy -t west
 ```
 
 Override the alert address per deploy with `--var alert_email=you@databricks.com`.

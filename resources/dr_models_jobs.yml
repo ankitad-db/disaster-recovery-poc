@@ -16,6 +16,28 @@
 
 resources:
   jobs:
+    # BOOTSTRAP: create the UC control tables (catalog/schemas, audit, dr_state) in
+    # the LOCAL metastore. Run once per region (deploy + run -t east AND -t west).
+    # Idempotent (CREATE ... IF NOT EXISTS), so safe to re-run.
+    dr_models_bootstrap:
+      name: "[DR] models · bootstrap UC control tables (run once per region)"
+      tags: { dr_module: models, dr_phase: bootstrap }
+      run_as:
+        service_principal_name: ad-dr-spn
+      email_notifications:
+        on_failure: ["${var.alert_email}"]
+      tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../notebooks/00_setup.py
+          environment_key: dr_env
+      environments:
+        - environment_key: dr_env
+          spec:
+            client: "2"
+      queue:
+        enabled: true
+
     # RECOMMENDED baseline: single-job cross-workspace pull. Run once on the
     # SECONDARY to seed it from the primary registry via the dr_remote_west scope.
     dr_models_replicate:
