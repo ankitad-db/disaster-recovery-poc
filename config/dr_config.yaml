@@ -43,6 +43,22 @@ storage:
 engine:
   backend: api
 
+# Cross-workspace replication credentials.
+# The DR job runs in the LOCAL (destination) workspace and pulls from the REMOTE
+# (source) workspace's registry. Each entry is the secret scope IN THE LOCAL
+# workspace that holds host + token (an ad-dr-spn PAT) for reaching that source.
+#   Normal sync : runs in east, source = west  -> uses secrets.west  (scope lives in east)
+#   Failback    : runs in west, source = east  -> uses secrets.east  (scope lives in west)
+secrets:
+  west:
+    scope: dr_remote_west
+    host_key: host
+    token_key: token
+  east:
+    scope: dr_remote_east
+    host_key: host
+    token_key: token
+
 # Models module scope.
 models:
   # Names or prefixes to replicate. Use "all" for everything.

@@ -7,8 +7,31 @@
 
 resources:
   jobs:
-    # Split baseline: deploy + run dr_models_export on the PRIMARY target,
-    # bridge the bucket (CRR / aws s3 sync), then run dr_models_import on SECONDARY.
+    # RECOMMENDED: single-job cross-workspace pull. Deploy + run on the SECONDARY
+    # target; it authenticates to the primary via the dr_remote_west secret scope,
+    # exports the remote registry into the local bucket, and imports locally.
+    dr_models_replicate:
+      name: "[DR] models · replicate (run in SECONDARY, pulls from primary)"
+      run_as:
+        service_principal_name: ad-dr-spn
+      tasks:
+        - task_key: replicate
+          notebook_task:
+            notebook_path: ../notebooks/02_replicate_secondary.py
+          environment_key: dr_env
+      environments:
+        - environment_key: dr_env
+          spec:
+            client: "2"
+            dependencies:
+              - "git+https://github.com/mlflow/mlflow-export-import@master"
+              - -e ..
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+
+    # ALTERNATIVE (storage-bridge variant): export on PRIMARY, bridge bucket
+    # (S3 CRR), then import on SECONDARY.
     dr_models_export:
       name: "[DR] models · baseline export (run in PRIMARY)"
       run_as:

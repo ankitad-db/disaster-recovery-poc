@@ -69,6 +69,10 @@ class Config:
         return self._raw.get("models", {})
 
     @property
+    def secrets(self) -> Dict[str, Any]:
+        return self._raw.get("secrets", {})
+
+    @property
     def engine_backend(self) -> str:
         return self._raw.get("engine", {}).get("backend", "api")
 

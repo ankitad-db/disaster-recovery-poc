@@ -5,7 +5,7 @@ from __future__ import annotations
 from ...common import storage
 from ...core.base import BaseDRModule
 from ...core.registry import register
-from . import baseline, cdc, dependencies, failover, grants, seed
+from . import baseline, cdc, dependencies, failover, grants, replicate, seed
 from ._selection import resolve_models
 
 
@@ -22,6 +22,12 @@ class ModelsDRModule(BaseDRModule):
 
     def baseline(self) -> None:
         baseline.run_baseline(self.ctx)
+        if self.cfg.models.get("replicate_grants", False):
+            grants.replicate_grants(self.ctx)
+
+    def replicate(self) -> None:
+        """Recommended: pull from remote source into local dest (one job, no bridge)."""
+        replicate.run_replicate(self.ctx, full=True)
         if self.cfg.models.get("replicate_grants", False):
             grants.replicate_grants(self.ctx)
 

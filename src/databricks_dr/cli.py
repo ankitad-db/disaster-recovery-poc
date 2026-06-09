@@ -19,6 +19,7 @@ _logger = get_logger(__name__)
 # command is named "import" but dispatches to the module's import_() method.
 _ACTIONS = {
     "seed": "seed",
+    "replicate": "replicate",
     "baseline": "baseline",
     "export": "export",
     "import": "import_",

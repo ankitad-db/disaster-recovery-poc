@@ -33,16 +33,55 @@ def local_or_profile_uri(profile_uri: str) -> str:
     return LOCAL_UC_REGISTRY if is_databricks_runtime() else profile_uri
 
 
-def make_mlflow_client(registry_uri: str):
-    """Create an MlflowClient bound to a specific (UC) registry URI.
+def tracking_uri_from_registry(registry_uri: str) -> str:
+    """Derive the matching tracking URI for a UC registry URI.
 
-    ``registry_uri`` looks like ``databricks-uc://<profile>``. The matching
-    profile must exist in ~/.databrickscfg (``databricks auth login ... --profile``).
+    ``databricks-uc://prof`` -> ``databricks://prof`` ; ``databricks-uc`` ->
+    ``databricks``. Export reads runs/experiments (tracking) *and* models
+    (registry), so both must point at the same workspace.
+    """
+    if registry_uri.startswith("databricks-uc://"):
+        return "databricks://" + registry_uri.split("://", 1)[1]
+    return "databricks"
+
+
+def make_mlflow_client(registry_uri: str, tracking_uri: str | None = None):
+    """Create an MlflowClient bound to a (UC) registry URI + matching tracking URI.
+
+    For a *remote* workspace, ``registry_uri`` is ``databricks-uc://<profile>`` and
+    the profile must exist in ~/.databrickscfg (see ``configure_remote_profile``).
+    For the *local* workspace on a cluster, pass ``databricks-uc``.
     """
     from mlflow import MlflowClient  # imported lazily so config/CLI work without mlflow
 
-    _logger.debug("Creating MlflowClient registry_uri=%s", registry_uri)
-    return MlflowClient(registry_uri=registry_uri)
+    tracking_uri = tracking_uri or tracking_uri_from_registry(registry_uri)
+    _logger.debug("Creating MlflowClient tracking=%s registry=%s", tracking_uri, registry_uri)
+    return MlflowClient(tracking_uri=tracking_uri, registry_uri=registry_uri)
+
+
+def configure_remote_profile(profile: str, host: str, token: str) -> str:
+    """Write/update a ~/.databrickscfg profile so MLflow can reach a remote workspace.
+
+    Lets the DR job (running in the local workspace) authenticate to the remote
+    source workspace using a secret-scoped host + SPN token, with no laptop step.
+    Returns the UC registry URI for that profile.
+    """
+    import configparser
+    import os
+
+    cfg_path = os.path.expanduser("~/.databrickscfg")
+    parser = configparser.ConfigParser()
+    if os.path.exists(cfg_path):
+        parser.read(cfg_path)
+    if not parser.has_section(profile):
+        parser.add_section(profile)
+    parser.set(profile, "host", host)
+    parser.set(profile, "token", token)
+    with open(cfg_path, "w") as f:
+        parser.write(f)
+    os.chmod(cfg_path, 0o600)
+    _logger.info("Configured remote databricks profile '%s' for host %s", profile, host)
+    return f"databricks-uc://{profile}"
 
 
 def tracking_uri_for(region: RegionConfig) -> str:

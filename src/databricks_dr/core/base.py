@@ -26,6 +26,7 @@ class RunContext:
     triggered_by: str = "MANUAL"
     dry_run: bool = False
     spark: Optional[object] = None  # set inside Databricks notebooks/jobs
+    dbutils: Optional[object] = None  # for reading cross-workspace secret scopes
 
 
 class BaseDRModule(ABC):
