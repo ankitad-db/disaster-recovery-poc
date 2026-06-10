@@ -11,9 +11,12 @@ as new modules under `src/databricks_dr/modules/` without changing the core.
   third-party dependency (in `requirements.txt`), never modified and never committed here.
   Only `common/engine.py` calls it.
 - **Strategy:** one-time **baseline** (full history) + steady-state **incremental CDC** (per new
-  version), bridged across regions via S3 (sync or CRR). An **audit table** is the source of truth
-  for what was replicated; `system.access.audit` is a trigger only.
-- **Direction is parameterized:** failover/failback flip a role flag; the same code runs both ways.
+  version). The recommended path is a **cross-workspace pull**: the DR job runs in the destination
+  and reads the source registry via a secret scope (no laptop, no cross-region S3 bridge). An
+  **audit table** records every action; a single-row **`dr_state`** table holds the active-primary
+  role so failover survives across job runs.
+- **Direction is parameterized:** failover/failback flip the role (in `dr_state`); the same code
+  runs both ways. Consumer-facing extras (UC grants, serving endpoints) replicate alongside models.
 
 See the architecture and phased plan in the project plan document.
 
@@ -24,10 +27,12 @@ src/databricks_dr/
   cli.py                 # python -m databricks_dr <module> <action>
   common/                # config, clients, engine adapter, storage, audit, logging
   core/                  # BaseDRModule ABC + module registry
-  modules/models/        # the models DR module (seed/baseline/cdc/grants/deps/endpoints/failover)
-config/dr_config.yaml    # workspaces, metastores, buckets, UC names
-sql/                     # catalog/schema + audit table DDL
-notebooks/               # thin Databricks wrappers
+  modules/models/        # models DR: seed/baseline/replicate/cdc/grants/deps/endpoints/health/failover
+config/dr_config.yaml    # workspaces, metastores, buckets, UC names, secret scopes
+sql/                     # catalog/schema + audit + dr_state DDL
+notebooks/               # thin Databricks wrappers (00 setup … drills)
+resources/               # Asset Bundle job definitions
+docs/architecture.md     # flows, failover/failback, orchestration
 ```
 
 ## Quick start (local)
@@ -48,20 +53,41 @@ databricks-dr models baseline    # one-time full export -> bridge -> import
 databricks-dr models cdc         # incremental sync
 ```
 
+## Run order (Git folder — interactive)
+
+Add this repo as a **Git folder** (Repos) in both workspaces, create the secret scopes
+(`dr_remote_west` in EAST, `dr_remote_east` in WEST), then run the notebooks in order.
+Each notebook self-installs the engine and bootstraps `sys.path`.
+
+| # | Notebook | Run in | Purpose |
+|---|----------|--------|---------|
+| 1 | `00_setup.py` | EAST **and** WEST | create catalog/schemas, audit table, `dr_state` (one-time) |
+| 2 | `01_seed_primary.py` | WEST | seed the POC model (one-time) |
+| 3 | `02_replicate_secondary.py` | EAST | baseline pull WEST→EAST (models, versions, grants, endpoints) |
+| 4 | `03_cdc.py` | EAST | incremental sync — steady state, re-run anytime |
+| 5 | `05_health_check.py` | EAST | drift / failure validation |
+
+On-demand: `06_test_endpoints.py` (EAST), `drill_failover.py` (EAST) + `drill_failback.py`
+(WEST), or the production `04_failover_failback.py` (`action` widget). After any `git push`,
+**Pull** the Git folder before running.
+
 ## Deploy to Databricks (Asset Bundles)
 
-The framework ships as a Databricks Asset Bundle (`databricks.yml` + `resources/`).
-It deploys the code and three jobs: a one-off `baseline`, a scheduled incremental
-`cdc` (every 15 min, starts PAUSED), and a manual `failover`/`failback` job. All run
-as the `ad-dr-spn` service principal.
+The framework ships as a Databricks Asset Bundle (`databricks.yml` + `resources/`),
+deploying the code and jobs (all run as `ad-dr-spn`): `dr_models_bootstrap`,
+`dr_models_replicate` (baseline), `dr_models_cdc` (CDC → health, every 15 min, starts
+PAUSED), `dr_models_health` (hourly scan), `dr_models_failover`, and the two drill jobs.
+Steady-state jobs live in the **secondary** (default target `east`).
 
 ```bash
-databricks bundle validate -t west
-databricks bundle deploy   -t west        # primary (us-west-2)
-databricks bundle run dr_models_baseline -t west
-# verify, then unpause the schedule:
-databricks bundle run dr_models_cdc -t west
-databricks bundle deploy -t east          # secondary, used for failback
+databricks bundle validate -t east
+databricks bundle deploy   -t east        # secondary (us-east-1): steady-state DR
+databricks bundle deploy   -t west        # primary: failback + bootstrap jobs
+databricks bundle run dr_models_bootstrap -t east   # create UC control tables
+databricks bundle run dr_models_bootstrap -t west
+databricks bundle run dr_models_replicate -t east   # baseline
+# verify, then go live (unpause schedules):
+databricks bundle deploy -t east --var cdc_pause_status=UNPAUSED
 ```
 
 ## Regions
