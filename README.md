@@ -8,10 +8,10 @@ as new modules under `src/databricks_dr/modules/` without changing the core.
 ## Design
 
 - **Engine:** [`mlflow-export-import`](https://github.com/mlflow/mlflow-export-import) is a pinned
-  third-party dependency (in `requirements.txt`), never modified and never committed here.
+  third-party dependency (in `requirements.txt`)
   Only `common/engine.py` calls it.
 - **Strategy:** one-time **baseline** (full history) + steady-state **incremental CDC** (per new
-  version). The recommended path is a **cross-workspace pull**: the DR job runs in the destination
+  version). Approach **cross-workspace pull**: the DR job runs in the destination
   and reads the source registry via a secret scope (no laptop, no cross-region S3 bridge). An
   **audit table** records every action; a single-row **`dr_state`** table holds the active-primary
   role so failover survives across job runs.
@@ -67,7 +67,7 @@ Each notebook self-installs the engine and bootstraps `sys.path`.
 | 4 | `03_cdc.py` | EAST | incremental sync — steady state, re-run anytime |
 | 5 | `05_health_check.py` | EAST | drift / failure validation |
 
-On-demand: `06_test_endpoints.py` (EAST), `drill_failover.py` (EAST) + `drill_failback.py`
+Misc: `06_test_endpoints.py` (EAST), `drill_failover.py` (EAST) + `drill_failback.py`
 (WEST), or the production `04_failover_failback.py` (`action` widget). After any `git push`,
 **Pull** the Git folder before running.
 
