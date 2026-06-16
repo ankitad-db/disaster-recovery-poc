@@ -39,8 +39,7 @@ docs/architecture.md     # flows, failover/failback, orchestration
 ## Getting started from scratch (Databricks Git folder)
 
 This is the end-to-end path for a brand-new user, run **interactively from notebooks** inside
-Databricks. No laptop setup is required — each notebook installs the engine and bootstraps its own
-`sys.path`.
+Databricks.
 
 ### 0. Prerequisites (one-time, by an admin)
 
