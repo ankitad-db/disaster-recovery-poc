@@ -1,0 +1,10 @@
+# Core framework dependencies
+mlflow>=2.16
+databricks-sdk>=0.30
+PyYAML>=6.0
+click>=8.1
+
+# Replication engine (third-party, pinned, NOT committed to this repo).
+# Pin to a specific commit SHA in production for reproducibility, e.g.:
+#   mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import@<commit-sha>
+mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import@master

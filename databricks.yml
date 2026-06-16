@@ -1,0 +1,64 @@
+# Databricks Asset Bundle for the DR framework.
+# Deploys the repo + scheduled DR workflows to a target workspace.
+#
+#   databricks bundle validate -t east
+#   databricks bundle deploy   -t east       # secondary (us-east-1): steady-state DR jobs
+#   databricks bundle deploy   -t west       # primary (us-west-2): for failback jobs
+#
+# Go live (unpause schedules):
+#   databricks bundle deploy -t east --var cdc_pause_status=UNPAUSED
+# Run a job on demand:
+#   databricks bundle run dr_models_replicate -t east     # baseline
+#   databricks bundle run dr_models_cdc -t east           # one CDC+health pass
+#   databricks bundle run dr_models_failover -t east -- --action failover
+#
+# Each target maps to a CLI profile from `databricks auth login ... --profile`.
+
+bundle:
+  name: databricks-dr
+
+include:
+  - resources/*.yml
+
+# Synced to the workspace under /Workspace/Users/<me>/.bundle/... by default.
+sync:
+  include:
+    - src/**
+    - config/**
+    - notebooks/**
+    - sql/**
+    - pyproject.toml
+    - requirements.txt
+
+variables:
+  cdc_schedule_cron:
+    description: Quartz cron for the incremental CDC job.
+    default: "0 0/15 * * * ?"   # every 15 minutes
+  health_schedule_cron:
+    description: Quartz cron for the independent health-scan safety-net job.
+    default: "0 0 * * * ?"      # hourly
+  cdc_pause_status:
+    description: PAUSED|UNPAUSED for scheduled jobs. Override to UNPAUSED to go live.
+    default: "PAUSED"
+  alert_email:
+    description: Address for job failure / failover notifications.
+    default: ankita.darekar@databricks.com
+  warehouse_id:
+    description: SQL warehouse id used for audit-table writes (optional).
+    default: ""
+
+# The steady-state DR jobs live in the SECONDARY (they pull from the primary), so
+# `east` is the day-to-day deploy target. `west` is the failback target.
+targets:
+  east:
+    default: true
+    mode: development
+    workspace:
+      profile: dr-east
+      host: https://fe-sandbox-ps-dr-wp-us-east-1.cloud.databricks.com
+
+  west:
+    mode: development
+    workspace:
+      profile: dr-west
+      host: https://fe-sandbox-ps-dr-wp-us-west-2.cloud.databricks.com

@@ -1,0 +1,77 @@
+# Databricks DR configuration.
+# Two cross-region workspaces in (separate) Databricks accounts.
+
+regions:
+  west:
+    role: primary            # primary | secondary (active role; flipped on failover)
+    region: us-west-2
+    profile: dr-west         # databricks CLI profile / MLflow registry suffix
+    registry_uri: databricks-uc://dr-west
+    host: https://fe-sandbox-ps-dr-wp-us-west-2.cloud.databricks.com
+    metastore: ad-dr-metastore-us-west-2
+    workspace: fe-sandbox-ps-dr-wp-us-west-2
+    dbfs_bucket: ps-dr-wp-us-west-2-us-west-2-dbfs-bucket--xmsr4h
+  east:
+    role: secondary
+    region: us-east-1
+    profile: dr-east
+    registry_uri: databricks-uc://dr-east
+    host: https://fe-sandbox-ps-dr-wp-us-east-1.cloud.databricks.com
+    metastore: ad-dr-metastore-us-east-1
+    workspace: fe-sandbox-ps-dr-wp-us-east-1
+    dbfs_bucket: ps-dr-wp-us-east-1-us-east-1-dbfs-bucket--s7yhiv
+
+# Identity used for replication (account admin SPN, present in both workspaces).
+service_principal: ad-dr-spn
+
+# Unity Catalog naming, mirrored in BOTH metastores.
+uc:
+  catalog: dr_poc
+  schema: ml
+  control_schema: dr_control          # audit + state tables live here
+  audit_table: dr_poc.dr_control.dr_replication_audit
+  state_table: dr_poc.dr_control.dr_state   # active-primary role (failover source of truth)
+
+# Storage layout on the DBFS root buckets (folders auto-created on first write).
+storage:
+  base_path: dr                       # /dbfs/dr/...
+  primary_folder: primary             # west-authored exports (west -> east)
+  secondary_folder: secondary         # east-authored exports (failback east -> west)
+  latest_pointer: _latest.txt
+  bridge: sync                        # sync (aws s3 sync) | crr (rely on S3 CRR)
+
+# Engine adapter backend: api (in-process) | cli (subprocess).
+engine:
+  backend: api
+
+# Cross-workspace replication credentials.
+# The DR job runs in the LOCAL (destination) workspace and pulls from the REMOTE
+# (source) workspace's registry. Each entry is the secret scope IN THE LOCAL
+# workspace that holds host + token (an ad-dr-spn PAT) for reaching that source.
+#   Normal sync : runs in east, source = west  -> uses secrets.west  (scope lives in east)
+#   Failback    : runs in west, source = east  -> uses secrets.east  (scope lives in west)
+secrets:
+  west:
+    scope: dr_remote_west
+    host_key: host
+    token_key: token
+  east:
+    scope: dr_remote_east
+    host_key: host
+    token_key: token
+
+# Models module scope.
+models:
+  # Names or prefixes to replicate. Use "all" for everything.
+  include:
+    - dr_poc.ml.iris_dr_model
+  export_all_runs_on_baseline: true
+  export_version_model: true
+  export_permissions: true
+  # Destination experiment parent for imported version runs (avoids notebook-path
+  # collisions; per-model child = <base>/<model name with dots->underscores>).
+  dest_experiment_base: /Shared/dr/experiments
+  # Consumer-facing extras
+  replicate_grants: true
+  replicate_serving_endpoints: true
+  consumer_group: dr_consumers
