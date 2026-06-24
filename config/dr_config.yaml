@@ -3,20 +3,20 @@
 
 regions:
   west:
-    role: primary            # primary | secondary (active role; flipped on failover)
+    role: secondary          # primary | secondary (active role; flipped on failover)
     region: us-west-2
     profile: dr-west         # databricks CLI profile / MLflow registry suffix
     registry_uri: databricks-uc://dr-west
-    host: https://fe-sandbox-ps-dr-wp-us-west-2.cloud.databricks.com
+    host: https://fe-sandbox-ankita-dr-wp-us-west-2.cloud.databricks.com
     metastore: ad-dr-metastore-us-west-2
     workspace: fe-sandbox-ps-dr-wp-us-west-2
     dbfs_bucket: ps-dr-wp-us-west-2-us-west-2-dbfs-bucket--xmsr4h
   east:
-    role: secondary
+    role: primary
     region: us-east-1
     profile: dr-east
     registry_uri: databricks-uc://dr-east
-    host: https://fe-sandbox-ps-dr-wp-us-east-1.cloud.databricks.com
+    host: https://fe-sandbox-krish-us-eat-1-sandbox.cloud.databricks.com
     metastore: ad-dr-metastore-us-east-1
     workspace: fe-sandbox-ps-dr-wp-us-east-1
     dbfs_bucket: ps-dr-wp-us-east-1-us-east-1-dbfs-bucket--s7yhiv
