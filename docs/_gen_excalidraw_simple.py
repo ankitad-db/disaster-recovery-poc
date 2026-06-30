@@ -73,24 +73,24 @@ text(360, 86, "The DR job runs in the secondary and PULLS from the primary. No c
 
 # 1. PRIMARY registry (source)
 rect(120, 200, 360, 200, WEST_S, WEST_BG)
-text(150, 218, "PRIMARY · us-west-2", size=20, color=WEST_S, bold=True)
+text(150, 218, "PRIMARY · us-east-1", size=20, color=WEST_S, bold=True)
 text(150, 256, "MLflow Model Registry\n\ndr_poc.ml.iris_dr_model\nv1..vN  (+ runs, grants,\nserving endpoint)", size=15, color="#1e1e1e")
 
-# 2. East bucket (landing)
+# 2. West bucket (landing)
 rect(770, 220, 300, 160, EAST_S, "#ffffff")
-text(795, 238, "DBFS bucket (east)", size=17, color=EAST_S, bold=True)
-text(795, 272, "exported model lands\nhere directly\n(local to secondary)", size=14, color="#495057")
+text(795, 238, "Staging Volume (local)", size=17, color=EAST_S, bold=True)
+text(795, 272, "exported bundle lands on\nthe staging Volume\n(local to secondary)", size=14, color="#495057")
 
 # 3. SECONDARY registry (dest)
 rect(1360, 200, 360, 200, EAST_S, EAST_BG)
-text(1390, 218, "SECONDARY · us-east-1", size=20, color=EAST_S, bold=True)
+text(1390, 218, "SECONDARY · us-west-2", size=20, color=EAST_S, bold=True)
 text(1390, 256, "MLflow Model Registry\n\nsame models imported\nv1..vN  (+ runs, grants,\nendpoint in standby)", size=15, color="#1e1e1e")
 
 # DR engine (under the flow)
 rect(120, 470, 1600, 120, ENG_S, ENG_BG)
 text(150, 486, "DR job (runs in SECONDARY, as ad-dr-spn)", size=18, color=ENG_S, bold=True)
-text(150, 520, "Authenticates to the primary via a secret scope. EXPORT phase wears the WEST identity to read the source;\n"
-               "IMPORT phase wears the local EAST identity to write. Engine = mlflow-export-import. Baseline once, then incremental CDC.",
+text(150, 520, "Authenticates to the primary via a secret scope. EXPORT phase wears the EAST identity to read the source;\n"
+               "IMPORT phase wears the local WEST identity to write. Engine = native (MLflow APIs + SDK). Baseline once, then incremental CDC.",
      size=14, color="#495057")
 
 # Control plane
@@ -106,12 +106,12 @@ arrow(1070, 300, 1360, 300, color=EAST_S, label="2 · IMPORT (local identity)")
 # Failover / failback band
 rect(120, 770, 1600, 150, "#e03131", "#fff5f5")
 text(150, 784, "FAILOVER  &  FAILBACK", size=20, color="#e03131", bold=True)
-text(150, 822, "FAILOVER (in EAST): promote east (already warm), scale up endpoint, dr_state → east. Repoint consumers.", size=14, color="#495057")
-text(150, 852, "FAILBACK (in WEST): reverse pull east → west to recover outage-time versions, dr_state → west.", size=14, color="#495057")
+text(150, 822, "FAILOVER (in WEST): promote west (already warm), scale up endpoint, dr_state → west. Repoint consumers.", size=14, color="#495057")
+text(150, 852, "FAILBACK (in EAST): reverse pull west → east to recover outage-time versions, dr_state → east.", size=14, color="#495057")
 text(150, 886, "Same code both ways — direction comes from dr_state, not hardcoded.", size=13, color="#e03131")
 
-arrow(490, 430, 1355, 430, color=EAST_S, label="steady state  west → east")
-arrow(1355, 455, 490, 455, color="#e03131", dashed=True, label="failback  east → west")
+arrow(490, 430, 1355, 430, color=EAST_S, label="steady state  east → west")
+arrow(1355, 455, 490, 455, color="#e03131", dashed=True, label="failback  west → east")
 
 doc = {"type": "excalidraw", "version": 2, "source": "databricks-dr",
        "elements": els, "appState": {"gridSize": None, "viewBackgroundColor": "#ffffff"}, "files": {}}

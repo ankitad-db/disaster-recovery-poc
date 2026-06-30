@@ -36,9 +36,26 @@ def rel_export_dir(cfg: Config, direction: Direction, ts: str, model_name: str |
     return f"{base}/{direction.folder}/exports/{ts}"
 
 
-def dbfs_path(rel: str) -> str:
-    """FUSE path usable from a Databricks notebook/job (``/dbfs/...``)."""
-    return f"/dbfs/{rel}"
+def staging_root(cfg: Config | None = None) -> str:
+    """FUSE prefix bundles are staged under.
+
+    A configured ``storage.staging_volume`` (3-level UC volume) resolves to its
+    ``/Volumes/<cat>/<schema>/<vol>`` FUSE path (serverless/shared-safe, S3-backed,
+    governed). Otherwise we fall back to the DBFS root ``/dbfs`` for back-compat.
+    """
+    vol = cfg.staging_volume if cfg is not None else None
+    if vol:
+        return "/Volumes/" + vol.replace(".", "/")
+    return "/dbfs"
+
+
+def dbfs_path(rel: str, cfg: Config | None = None) -> str:
+    """Absolute FUSE path for a bundle-relative path, under the staging root.
+
+    Name kept for call-site compatibility; honours the configured staging volume
+    when ``cfg`` is provided, else the DBFS root.
+    """
+    return f"{staging_root(cfg)}/{rel}"
 
 
 def s3_uri(bucket: str, rel: str) -> str:
@@ -49,7 +66,7 @@ def write_latest_pointer(cfg: Config, direction: Direction, rel: str) -> str:
     """Record the newest export path so the importer resolves it dynamically."""
     base = cfg.storage["base_path"]
     pointer_rel = f"{base}/{direction.folder}/{cfg.storage['latest_pointer']}"
-    pointer_path = dbfs_path(pointer_rel)
+    pointer_path = dbfs_path(pointer_rel, cfg)
     try:
         with open(pointer_path, "w") as f:
             f.write(rel)
@@ -61,7 +78,7 @@ def write_latest_pointer(cfg: Config, direction: Direction, rel: str) -> str:
 
 def read_latest_pointer(cfg: Config, direction: Direction) -> str:
     base = cfg.storage["base_path"]
-    pointer_path = dbfs_path(f"{base}/{direction.folder}/{cfg.storage['latest_pointer']}")
+    pointer_path = dbfs_path(f"{base}/{direction.folder}/{cfg.storage['latest_pointer']}", cfg)
     with open(pointer_path) as f:
         return f.read().strip()
 

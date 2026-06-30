@@ -1,22 +1,23 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 02 · Replicate  (run in SECONDARY / us-east-1)  — RECOMMENDED
+# MAGIC # 02 · Replicate  (run in the SECONDARY region)  — RECOMMENDED
 # MAGIC One self-contained DR job: authenticates to the PRIMARY via a **secret
-# MAGIC scope**, exports its registry straight into this (east) workspace's DBFS
-# MAGIC bucket, then imports into the east registry. No laptop, no cross-region S3.
+# MAGIC scope**, exports its registry straight into this (secondary) workspace's
+# MAGIC `dr_staging` Volume (`/Volumes/dr_poc/dr_control/dr_staging/...`), then imports
+# MAGIC into the local registry. No laptop, no cross-region S3.
+# MAGIC
+# MAGIC **Current mapping:** secondary = **west** (`fe-sandbox-ankita-dr-wp-us-west-2`),
+# MAGIC source/primary = **east** (`fe-sandbox-krish-us-eat-1-sandbox`).
 # MAGIC
 # MAGIC ### One-time setup (do once, not at runtime)
-# MAGIC In the PRIMARY: generate a PAT for `ad-dr-spn`.
-# MAGIC In THIS (secondary) workspace, create the scope holding it:
+# MAGIC In the PRIMARY (east): generate a PAT for `ad-dr-spn`.
+# MAGIC In THIS (secondary / west) workspace, create the scope holding it
+# MAGIC (name = `secrets.east.scope` in config):
 # MAGIC ```
-# MAGIC databricks secrets create-scope dr_remote_west
-# MAGIC databricks secrets put-secret dr_remote_west host  # https://fe-sandbox-ps-dr-wp-us-west-2.cloud.databricks.com
-# MAGIC databricks secrets put-secret dr_remote_west token # the ad-dr-spn PAT from primary
+# MAGIC databricks secrets create-scope dr_remote_east
+# MAGIC databricks secrets put-secret dr_remote_east host  # https://fe-sandbox-krish-us-eat-1-sandbox.cloud.databricks.com
+# MAGIC databricks secrets put-secret dr_remote_east token # the ad-dr-spn PAT from east (primary)
 # MAGIC ```
-
-# COMMAND ----------
-# MAGIC %pip install "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import@master"
-# MAGIC dbutils.library.restartPython()
 
 # COMMAND ----------
 # MAGIC %run ./_bootstrap

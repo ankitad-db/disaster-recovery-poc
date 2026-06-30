@@ -20,10 +20,6 @@
 # MAGIC 2. The `dr_remote_west` secret scope exists in EAST (already set up for CDC).
 
 # COMMAND ----------
-# MAGIC %pip install "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import@master"
-# MAGIC dbutils.library.restartPython()
-
-# COMMAND ----------
 # MAGIC %run ./_bootstrap
 
 # COMMAND ----------

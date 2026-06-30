@@ -9,8 +9,12 @@ regions:
     registry_uri: databricks-uc://dr-west
     host: https://fe-sandbox-ankita-dr-wp-us-west-2.cloud.databricks.com
     metastore: ad-dr-metastore-us-west-2
-    workspace: fe-sandbox-ps-dr-wp-us-west-2
-    dbfs_bucket: ps-dr-wp-us-west-2-us-west-2-dbfs-bucket--xmsr4h
+    workspace: fe-sandbox-ankita-dr-wp-us-west-2
+    # Only used by the optional bridge: sync|crr path; the default pull stages on the
+    # staging volume. Points at this region's real external S3 bucket.
+    dbfs_bucket: ankita-dr-wp-us-west-2-ext-s3-332745928618-sbxw70
+    # S3 bucket behind this workspace's UC external location (backs the staging volume).
+    external_location_url: s3://ankita-dr-wp-us-west-2-ext-s3-332745928618-sbxw70/
   east:
     role: primary
     region: us-east-1
@@ -18,8 +22,11 @@ regions:
     registry_uri: databricks-uc://dr-east
     host: https://fe-sandbox-krish-us-eat-1-sandbox.cloud.databricks.com
     metastore: ad-dr-metastore-us-east-1
-    workspace: fe-sandbox-ps-dr-wp-us-east-1
-    dbfs_bucket: ps-dr-wp-us-east-1-us-east-1-dbfs-bucket--s7yhiv
+    workspace: fe-sandbox-krish-us-eat-1-sandbox
+    # Only used by the optional bridge: sync|crr path; the default pull stages on the
+    # staging volume. Points at this region's real external S3 bucket.
+    dbfs_bucket: krish-us-eat-1-sandbox-ext-s3-332745928618-k6hevn
+    external_location_url: s3://krish-us-eat-1-sandbox-ext-s3-332745928618-k6hevn/
 
 # Identity used for replication (account admin SPN, present in both workspaces).
 service_principal: ad-dr-spn
@@ -31,18 +38,26 @@ uc:
   control_schema: dr_control          # audit + state tables live here
   audit_table: dr_poc.dr_control.dr_replication_audit
   state_table: dr_poc.dr_control.dr_state   # active-primary role (failover source of truth)
+  mapping_table: dr_poc.dr_control.dr_id_mapping  # source<->dest experiment/run/version IDs
 
-# Storage layout on the DBFS root buckets (folders auto-created on first write).
+# Storage layout for export bundles (folders auto-created on first write).
 storage:
-  base_path: dr                       # /dbfs/dr/...
-  primary_folder: primary             # west-authored exports (west -> east)
-  secondary_folder: secondary         # east-authored exports (failback east -> west)
+  base_path: dr                       # <staging_root>/dr/...
+  primary_folder: primary             # primary-authored exports (primary -> secondary)
+  secondary_folder: secondary         # secondary-authored exports (failback)
   latest_pointer: _latest.txt
   bridge: sync                        # sync (aws s3 sync) | crr (rely on S3 CRR)
+  # Staging root for bundles. Set to a UC external Volume (3-level cat.schema.vol)
+  # to stage on a governed, S3-backed location reachable via /Volumes/... — works on
+  # serverless + shared compute (unlike the DBFS root /dbfs FUSE). 00_setup creates
+  # this volume on the LOCAL region's external_location_url. Comment out to fall back
+  # to the DBFS root (/dbfs).
+  staging_volume: dr_poc.dr_control.dr_staging
 
-# Engine adapter backend: api (in-process) | cli (subprocess).
+# Replication engine. Only the first-party native MLflow-API engine is supported
+# (src/databricks_dr/common/native); the value is kept for forward-compatibility.
 engine:
-  backend: api
+  backend: native
 
 # Cross-workspace replication credentials.
 # The DR job runs in the LOCAL (destination) workspace and pulls from the REMOTE
@@ -65,6 +80,15 @@ models:
   # Names or prefixes to replicate. Use "all" for everything.
   include:
     - dr_poc.ml.iris_dr_model
+    - dr_poc.ml.wine_dr_model
+    - dr_poc.ml.cancer_dr_model
+  # POC-only seeding spec (used by 01_seed_primary.py). Each entry creates one model
+  # with n_versions backing runs. dataset in: iris | wine | breast_cancer.
+  # In production this section is ignored (your training pipeline produces the models).
+  seed:
+    - {name: dr_poc.ml.iris_dr_model,   dataset: iris,          n_versions: 2}
+    - {name: dr_poc.ml.wine_dr_model,   dataset: wine,          n_versions: 3}
+    - {name: dr_poc.ml.cancer_dr_model, dataset: breast_cancer, n_versions: 2}
   export_all_runs_on_baseline: true
   export_version_model: true
   export_permissions: true
@@ -75,3 +99,20 @@ models:
   replicate_grants: true
   replicate_serving_endpoints: true
   consumer_group: dr_consumers
+
+  # --- native engine tuning (all optional; safe defaults shown) ---
+  # Bounded parallelism for per-version (single model) and per-model (bulk) work.
+  # 1 = fully sequential/deterministic (POC default); raise for throughput at scale.
+  max_workers: 1
+  # Notebook revisions to export with each backing run (CSV or list): SOURCE|HTML|JUPYTER|DBC.
+  notebook_formats: SOURCE
+  # Optional workspace dir to re-upload SOURCE notebooks into on import (null = skip).
+  notebook_dest_dir: null
+  # MLflow 3 / GenAI replication (version-gated; degrade to SKIPPED when unsupported).
+  prompts: []                 # prompt-registry names to replicate (>=2.21)
+  evaluation_datasets: []     # GenAI evaluation dataset names to replicate (>=3.4)
+  replicate_traces: false     # traces+assessments can be large; off by default (>=2.14)
+  # CDC change detection. Default = authoritative registry diff (correct + idempotent
+  # for the cross-account pull). Set true only where the job's system.access.audit
+  # stream carries the SOURCE's model events (source-side / shared-account runs).
+  cdc_use_system_tables: false

@@ -3,9 +3,9 @@
 # MAGIC # _bootstrap (helper, %run from other notebooks)
 # MAGIC Makes notebooks self-locating inside a **Git folder** so nothing is hardcoded.
 # MAGIC Derives the repo root from this notebook's own path, puts `src/` on `sys.path`,
-# MAGIC and exposes `REPO_ROOT` + `CONFIG_PATH`. The replication **engine**
-# MAGIC (`mlflow-export-import`) must be pip-installed by the *caller* before `%run`,
-# MAGIC because `%pip` + `restartPython` has to run in the caller's own first cell.
+# MAGIC and exposes `REPO_ROOT` + `CONFIG_PATH`. The replication **engine** is
+# MAGIC first-party (`databricks_dr.common.native`) and uses the runtime's MLflow +
+# MAGIC databricks-sdk, so no engine install is needed before `%run`.
 
 # COMMAND ----------
 import os

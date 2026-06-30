@@ -3,8 +3,8 @@
 Cross-region Disaster Recovery for Unity Catalog **models** between two
 region-bound workspaces:
 
-- **Primary (source):** `fe-sandbox-ps-dr-wp-us-west-2` (us-west-2)
-- **Secondary (dest):** `fe-sandbox-ps-dr-wp-us-east-1` (us-east-1)
+- **Primary (source):** `fe-sandbox-krish-us-eat-1-sandbox` (us-east-1)
+- **Secondary (dest):** `fe-sandbox-ankita-dr-wp-us-west-2` (us-west-2)
 
 The recommended mechanism is a **cross-workspace pull**: a single job runs in the
 **secondary** workspace, becomes the primary's identity (via a secret scope) to
@@ -20,15 +20,15 @@ model, its versions, aliases, experiments, and run metadata live in the
 **metastore / UC control plane** — not only in S3.
 
 - **CRR replicates S3 bytes only.** It copies `model.pkl`, `MLmodel`, etc. from
-  the west bucket to the east bucket. It does **not** create the registered
-  model, versions, or aliases in the east metastore.
+  the east bucket to the west bucket. It does **not** create the registered
+  model, versions, or aliases in the west metastore.
 - Therefore CRR **cannot** perform model DR on its own — an `import` step
   (`create_model_version`, alias assignment, run/experiment recreation) is
   always required. The cross-workspace pull performs that import.
 
 | | Cross-workspace pull (current) | CRR alone | Split + CRR |
 |---|---|---|---|
-| Recreates UC registry/versions/aliases in east | yes (import) | never | yes (import) |
+| Recreates UC registry/versions/aliases in west | yes (import) | never | yes (import) |
 | Moves artifacts across regions | yes (direct pull) | yes | yes |
 | Extra infra (replication rules, versioning, KMS) | none | yes | yes |
 | Laptop / external host | none | none | none (if CRR) |
@@ -36,7 +36,7 @@ model, its versions, aliases, experiments, and run metadata live in the
 
 **Verdict:** keep the cross-workspace pull as the core DR mechanism. The
 split + CRR variant remains available (see `02a/02b` + `bridge`) for cases such
-as a policy that forbids holding a cross-workspace token in east, very large
+as a policy that forbids holding a cross-workspace token in west, very large
 artifacts, or thousands of models — but it still needs the import step.
 
 ---
@@ -46,23 +46,30 @@ artifacts, or thousands of models — but it still needs the import step.
 The pull job needs two identities and switches the process's *ambient* Databricks
 identity between phases (`_ambient_identity` in `replicate.py`):
 
-- **WEST identity** — host + SPN token read from an EAST **secret scope**. Used
+- **EAST identity** — host + SPN token read from an WEST **secret scope**. Used
   to read from the primary, including the `generate-temporary-credentials` call
   that downloads model artifacts (UC resolves artifact creds from the ambient
   identity, not the MlflowClient's registry profile).
-- **EAST identity** — the cluster's own ambient identity. Used to import into the
+- **WEST identity** — the cluster's own ambient identity. Used to import into the
   local registry.
 
-The intermediate landing zone is the **EAST DBFS root bucket** — the export
-writes straight there, so there is no second bucket-to-bucket copy.
+The intermediate landing zone is a **UC external Volume in the destination
+metastore** (`storage.staging_volume`, e.g. `dr_poc.dr_control.dr_staging`),
+backed by that region's S3 external location. The export writes straight there via
+its `/Volumes/…` FUSE path, so there is no second bucket-to-bucket copy. A volume is
+used (instead of the DBFS root `/dbfs`) because the FUSE mount for `/dbfs` is **not
+available on serverless or shared-access compute** — Volumes are, and they are
+governed by Unity Catalog. `00_setup` creates the volume on the local region's
+`external_location_url`; if `storage.staging_volume` is unset, staging falls back to
+`/dbfs` (single-user clusters only).
 
 ```
-WEST managed S3            EAST DBFS root bucket            EAST UC registry S3
-(source artifacts)         (intermediate)                   (final)
+SOURCE UC artifacts        DEST staging Volume (S3)         DEST UC registry S3
+(primary region)           /Volumes/dr_poc/dr_control/…     (final)
         |                          |                                |
-        |  EXPORT (west identity)  |                                |
+        | EXPORT (source identity) |                                |
         +---------- download ----->|                                |
-                                   |  IMPORT (east ambient id)      |
+                                   |  IMPORT (dest ambient id)      |
                                    +----------- upload ------------>|
 ```
 
@@ -78,19 +85,19 @@ flowchart TD
         S1 --> S2
     end
 
-    subgraph WEST[PRIMARY - WEST workspace]
-        SEED[Seed model: train iris,<br/>log v1/v2/v3, aliases champion/challenger + tags<br/><b>notebooks/01_seed_primary.py</b><br/>modules/models/seed.py seed_primary]
+    subgraph EAST[PRIMARY - EAST workspace]
+        SEED[Seed models: iris/wine/cancer,<br/>multi-version runs, aliases champion/challenger + tags<br/><b>notebooks/01_seed_primary.py</b><br/>modules/models/seed.py seed_models]
     end
 
-    subgraph EAST[SECONDARY - EAST workspace]
-        REP[Baseline replicate - pull from WEST<br/><b>notebooks/02_replicate_secondary.py</b><br/>module.py replicate / replicate.py run_replicate]
+    subgraph WEST[SECONDARY - WEST workspace]
+        REP[Baseline replicate - pull from EAST<br/><b>notebooks/02_replicate_secondary.py</b><br/>module.py replicate / replicate.py run_replicate]
         CDC[Scheduled incremental sync<br/><b>notebooks/03_cdc.py</b><br/>cdc.py run_cdc]
     end
 
     S2 --> SEED
     SEED --> REP
     REP --> CDC
-    CDC -. "new version in WEST? watermark-gated re-pull" .-> CDC
+    CDC -. "new version in EAST? watermark-gated re-pull" .-> CDC
 
     SEED -.records.-> AUDIT[(Audit table - shared<br/>observability + watermark<br/><b>common/audit.py</b>)]
     REP -.records.-> AUDIT
@@ -101,9 +108,9 @@ flowchart TD
 |---|---|---|---|---|
 | 0 | `sql/01_uc_objects.sql` | both | Create `dr_poc` catalog + `ml` / `dr_control` schemas | — |
 | 0 | `sql/02_audit_table.sql` | both | Create the audit/watermark table | — |
-| 1 | `notebooks/01_seed_primary.py` | **WEST** | Create iris model: v1/v2/v3, aliases, tags, runs, experiment | `modules/models/seed.py` |
-| 2 | `notebooks/02_replicate_secondary.py` | **EAST** | Baseline cross-workspace pull | `module.py` -> `replicate` |
-| 3 | `notebooks/03_cdc.py` | **EAST** | Scheduled incremental sync, watermark-gated | `cdc.py` -> `run_cdc` |
+| 1 | `notebooks/01_seed_primary.py` | **EAST** | Create POC models (iris/wine/cancer): multi-version, aliases, tags, runs, experiments | `modules/models/seed.py` |
+| 2 | `notebooks/02_replicate_secondary.py` | **WEST** | Baseline cross-workspace pull | `module.py` -> `replicate` |
+| 3 | `notebooks/03_cdc.py` | **WEST** | Scheduled incremental sync, watermark-gated | `cdc.py` -> `run_cdc` |
 
 > In production the seed is replaced by the normal ML training pipeline producing
 > models in the primary; seeding is the POC's stand-in for "models already exist".
@@ -114,32 +121,32 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([Job starts in EAST<br/><b>notebooks/02_replicate_secondary.py</b><br/>notebooks/_bootstrap.py]) --> Ctx[Build RunContext: cfg, direction,<br/>AuditLog, dbutils<br/><b>common/config.py / common/audit.py</b>]
+    Start([Job starts in WEST<br/><b>notebooks/02_replicate_secondary.py</b><br/>notebooks/_bootstrap.py]) --> Ctx[Build RunContext: cfg, direction,<br/>AuditLog, dbutils<br/><b>common/config.py / common/audit.py</b>]
     Ctx --> Call[ModelsDRModule.replicate<br/><b>modules/models/module.py</b>]
     Call --> Run[run_replicate<br/><b>modules/models/replicate.py</b>]
 
-    Run --> Creds[_remote_creds: WEST host+token<br/>from secret scope<br/><b>replicate.py + config/dr_config.yaml</b>]
+    Run --> Creds[_remote_creds: EAST host+token<br/>from secret scope<br/><b>replicate.py + config/dr_config.yaml</b>]
 
-    Creds --> ExpPhase{{EXPORT PHASE<br/>_ambient_identity = WEST<br/><b>replicate.py</b>}}
+    Creds --> ExpPhase{{EXPORT PHASE<br/>_ambient_identity = EAST<br/><b>replicate.py</b>}}
     ExpPhase --> Paths[Dynamic export path<br/>new_timestamp/rel_export_dir/dbfs_path<br/><b>common/storage.py</b>]
     Paths --> Resolve[resolve_models in scope<br/><b>modules/models/_selection.py</b>]
     Resolve --> AuditE[Insert EXPORT row<br/><b>common/audit.py</b>]
-    AuditE --> Export[export_model -> mlflow-export-import<br/><b>common/engine.py</b>]
-    Export --> Pull[(Download v1/v2/v3 from WEST S3)]
-    Pull --> Land[(Write to EAST DBFS bucket<br/>/dbfs/dr/primary/exports/&lt;ts&gt;)]
+    AuditE --> Export[export_model (native engine)<br/><b>common/engine.py</b>]
+    Export --> Pull[(Download v1/v2/v3 from EAST S3)]
+    Pull --> Land[(Write to DEST staging Volume<br/>/Volumes/dr_poc/dr_control/dr_staging/dr/primary/exports/&lt;ts&gt;)]
     Land --> RecE[update_status EXPORT SUCCESS<br/><b>common/audit.py</b>]
 
-    RecE --> ImpPhase{{IMPORT PHASE<br/>_ambient_identity = EAST<br/><b>replicate.py</b>}}
+    RecE --> ImpPhase{{IMPORT PHASE<br/>_ambient_identity = WEST<br/><b>replicate.py</b>}}
     ImpPhase --> AuditI[Insert IMPORT row<br/><b>common/audit.py</b>]
     AuditI --> Import[import_model import_source_tags=False<br/><b>common/engine.py</b>]
-    Import --> Register[recreate runs/logged models,<br/>create_model_version x3, re-apply aliases<br/><b>mlflow-export-import via engine.py</b>]
-    Register --> Verify{_verify_import<br/>east has 1,2,3?<br/><b>replicate.py</b>}
+    Import --> Register[recreate runs/logged models,<br/>create_model_version x3, re-apply aliases<br/><b>native engine via engine.py</b>]
+    Register --> Verify{_verify_import<br/>west has 1,2,3?<br/><b>replicate.py</b>}
 
     Verify -- No --> Fail[update_status FAILED + raise<br/><b>common/audit.py</b>]
     Verify -- Yes --> Done[update_status SUCCESS source=3/target=3<br/><b>common/audit.py</b>]
 
-    Done --> Grants[replicate_grants WEST->EAST non-fatal<br/><b>modules/models/grants.py</b><br/>workspace_client_from_creds in common/clients.py]
-    Grants --> End([East = warm mirror])
+    Done --> Grants[replicate_grants EAST->WEST non-fatal<br/><b>modules/models/grants.py</b><br/>workspace_client_from_creds in common/clients.py]
+    Grants --> End([West = warm mirror])
     Fail --> End2([Audit FAILED -> alert])
 ```
 
@@ -149,9 +156,9 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Sched([Scheduled job in EAST<br/><b>notebooks/03_cdc.py</b>]) --> RunCdc[run_cdc<br/><b>modules/models/cdc.py</b>]
-    RunCdc --> Become[_ambient_identity = WEST via _remote_creds<br/><b>replicate.py + dr_config.yaml</b>]
-    Become --> Max[_max_version per model in WEST<br/>search_model_versions<br/><b>cdc.py + common/clients.py</b>]
+    Sched([Scheduled job in WEST<br/><b>notebooks/03_cdc.py</b>]) --> RunCdc[run_cdc<br/><b>modules/models/cdc.py</b>]
+    RunCdc --> Become[_ambient_identity = EAST via _remote_creds<br/><b>replicate.py + dr_config.yaml</b>]
+    Become --> Max[_max_version per model in EAST<br/>search_model_versions<br/><b>cdc.py + common/clients.py</b>]
     Max --> WM[watermark from audit table<br/>AuditLog.watermark<br/><b>common/audit.py</b>]
     WM --> Cmp{source max &gt; watermark?<br/><b>cdc.py</b>}
 
@@ -160,7 +167,7 @@ flowchart TD
     Rep --> Adv[Insert VERIFY row, advance watermark<br/><b>cdc.py + common/audit.py</b>]
 
     Skip --> EndC([Nothing to do])
-    Adv --> EndC2([East updated - RPO = schedule interval])
+    Adv --> EndC2([West updated - RPO = schedule interval])
 ```
 
 **RPO** = the CDC schedule interval. At an actual regional disaster you do **not**
@@ -207,11 +214,20 @@ use), so `import_source_tags=False` is set deliberately.
 
 ## 8. Engine vs. framework responsibilities
 
-`mlflow-export-import` is a **stateless, additive, directory-based serializer**
-for MLflow objects. This framework treats it as the *engine* (the export/import
-primitive, called via `common/engine.py`) and wraps it with the DR semantics it
-lacks. The tool is pinned as a dependency and called through an adapter rather
-than forked: upstream owns object serialization, we own DR behavior.
+> **Engine note (native).** The export/import primitive is now a **first-party
+> native engine** (`common/native/`) built directly on the public MLflow client +
+> databricks-sdk — there is no `mlflow-export-import` dependency. It stays in
+> lock-step with whatever MLflow version is installed on the runtime, and adds
+> MLflow 3 / GenAI coverage (logged models, prompts, evaluation datasets, traces),
+> notebook-revision export, permissions snapshots, and bounded parallelism. The
+> historical comparison below is retained because the *engine vs. framework*
+> split still holds: the engine serializes MLflow objects; the framework owns DR
+> behavior. References to "mlflow-export-import" below describe the serializer
+> role the native engine now fills.
+
+This framework keeps a clean split: the *engine* is the export/import primitive
+(called via `common/engine.py`), and the framework wraps it with the DR semantics
+the engine lacks.
 
 ### What the engine does
 
@@ -232,8 +248,8 @@ than forked: upstream owns object serialization, we own DR behavior.
 
 | Concern | mlflow-export-import | This framework |
 |---|---|---|
-| Cross-region transport of the export dir | out of scope | export written directly into east bucket via identity switch |
-| Cross-workspace auth | one tracking URI at a time | `_ambient_identity` swaps WEST/EAST mid-run |
+| Cross-region transport of the export dir | out of scope | export written directly into west bucket via identity switch |
+| Cross-workspace auth | one tracking URI at a time | `_ambient_identity` swaps EAST/WEST mid-run |
 | Incremental / CDC | no — additive every run | watermark-gated re-pull (`cdc.py`) |
 | Idempotency / no duplicates | additive | `delete_model=True` -> exact mirror |
 | Verification | bulk path swallows errors | `_verify_import` fails loudly |
@@ -245,14 +261,14 @@ than forked: upstream owns object serialization, we own DR behavior.
 
 ## 9. Failover & failback
 
-Steady state keeps **east a warm mirror** of west via scheduled CDC. The drill has
+Steady state keeps **west a warm mirror** of east via scheduled CDC. The drill has
 two halves — both reuse the same pull engine, just in the resolved direction. No
 replication logic is duplicated; only the *direction* changes.
 
 ### Direction resolution (the safety rail)
 
 `Config.direction()` decides source/dest so failover/failback never hardcode
-"west→east":
+"east→west":
 
 - **Normal / failover sync** — `direction()` resolves source = the **active**
   primary, looked up in this order: `DR_ACTIVE_PRIMARY` env (dev/drill only) →
@@ -260,8 +276,8 @@ replication logic is duplicated; only the *direction* changes.
   `role: primary`. So a persisted failover keeps CDC running in the right
   direction across **fresh job processes**, not just one notebook session.
 - **Failback** — `direction(failback=True)` resolves from the **config roles**
-  (the *home* primary), **ignoring** the active role. So `east → west` is correct
-  even while `dr_state` still says east. Resetting `dr_state` back to west is the
+  (the *home* primary), **ignoring** the active role. So `west → east` is correct
+  even while `dr_state` still says west. Resetting `dr_state` back to east is the
   final step — done automatically by `run_failback`, removing a classic
   double-inversion footgun.
 
@@ -275,25 +291,25 @@ replication logic is duplicated; only the *direction* changes.
 
 ```mermaid
 flowchart TD
-    Steady([Steady state<br/>west=primary, east=secondary<br/>CDC west→east keeps east warm]) --> Boom{{Disaster:<br/>west region down}}
+    Steady([Steady state<br/>east=primary, west=secondary<br/>CDC east→west keeps west warm]) --> Boom{{Disaster:<br/>east region down}}
 
-    Boom --> FO[FAILOVER — run in EAST<br/><b>notebooks/04 action=failover</b><br/>failover.py run_failover]
-    FO --> FO1[No pull — east already mirrored.<br/>Scale up local endpoints,<br/>insert FAILOVER audit row]
-    FO1 --> FO2[run_failover persists<br/>dr_state active_primary=east.<br/>Operator repoints consumers to east]
-    FO2 --> Outage[East serves;<br/>new model versions created in east]
+    Boom --> FO[FAILOVER — run in WEST<br/><b>notebooks/04 action=failover</b><br/>failover.py run_failover]
+    FO --> FO1[No pull — west already mirrored.<br/>Scale up local endpoints,<br/>insert FAILOVER audit row]
+    FO1 --> FO2[run_failover persists<br/>dr_state active_primary=west.<br/>Operator repoints consumers to west]
+    FO2 --> Outage[West serves;<br/>new model versions created in west]
 
-    Outage --> Recover{{West region recovers}}
-    Recover --> FB[FAILBACK — run in WEST<br/><b>notebooks/04 action=failback</b>]
-    FB --> FB1[Reverse CDC east→west<br/>cdc.py run_cdc, direction failback=True<br/>reads dr_remote_east scope in WEST]
-    FB1 --> FB2[watermark-gated pull of<br/>outage-time versions into west]
-    FB2 --> FB3[Insert FAILBACK audit row +<br/>reset dr_state active_primary=west<br/>failover.py run_failback]
+    Outage --> Recover{{East region recovers}}
+    Recover --> FB[FAILBACK — run in EAST<br/><b>notebooks/04 action=failback</b>]
+    FB --> FB1[Reverse CDC west→east<br/>cdc.py run_cdc, direction failback=True<br/>reads dr_remote_west scope in EAST]
+    FB1 --> FB2[watermark-gated pull of<br/>outage-time versions into east]
+    FB2 --> FB3[Insert FAILBACK audit row +<br/>reset dr_state active_primary=east<br/>failover.py run_failback]
     FB3 --> Steady
 ```
 
 | Action | Run in | Pull? | Source secret scope | Audit op |
 |---|---|---|---|---|
-| `failover` | **EAST** | no (primary may be down) | — | `FAILOVER` |
-| `failback` | **WEST** | yes, `east → west` | `dr_remote_east` (lives in WEST) | `FAILBACK` |
+| `failover` | **WEST** | no (primary may be down) | — | `FAILOVER` |
+| `failback` | **EAST** | yes, `west → east` | `dr_remote_west` (lives in EAST) | `FAILBACK` |
 
 > **Why no pull on failover:** at a real disaster the primary is unreachable, so the
 > RPO is whatever the last CDC achieved. The secondary is promoted as-is. Pulling is
@@ -324,18 +340,18 @@ scope held locally:
 
 | Direction | Runs in (dest) | Reads scope | Holds creds for |
 |---|---|---|---|
-| Normal / CDC (`west → east`) | EAST | `dr_remote_west` | west SPN PAT + host |
-| Failback (`east → west`) | WEST | `dr_remote_east` | east SPN PAT + host |
+| Normal / CDC (`east → west`) | WEST | `dr_remote_east` | east SPN PAT + host |
+| Failback (`west → east`) | EAST | `dr_remote_west` | west SPN PAT + host |
 
-For the failover/failback drill you must create the **mirror** scope in west
-(`dr_remote_east`) — symmetric to the `dr_remote_west` scope already in east:
+For the failover/failback drill you must create the **mirror** scope in east
+(`dr_remote_west`) — symmetric to the `dr_remote_east` scope already in west:
 
 ```bash
-# In the WEST workspace (profile dr-west):
-databricks secrets create-scope dr_remote_east --profile dr-west
-databricks secrets put-secret dr_remote_east host  --string-value \
-  "https://fe-sandbox-ps-dr-wp-us-east-1.cloud.databricks.com" --profile dr-west
-databricks secrets put-secret dr_remote_east token --string-value "<east-spn-PAT>" --profile dr-west
+# In the EAST workspace (profile dr-east):
+databricks secrets create-scope dr_remote_west --profile dr-east
+databricks secrets put-secret dr_remote_west host  --string-value \
+  "https://fe-sandbox-ankita-dr-wp-us-west-2.cloud.databricks.com" --profile dr-east
+databricks secrets put-secret dr_remote_west token --string-value "<west-spn-PAT>" --profile dr-east
 ```
 
 Both scope names/keys are configured in `config/dr_config.yaml` under `secrets:`.
@@ -347,21 +363,21 @@ Both scope names/keys are configured in `config/dr_config.yaml` under `secrets:`
 Everything you ran by hand is wired into Databricks Workflows via the Asset Bundle
 (`databricks.yml` + `resources/dr_models_jobs.yml`). The jobs run as `ad-dr-spn`
 and notify `${var.alert_email}` on failure. The steady-state jobs live in the
-**secondary** (east), because the pull always runs in the destination.
+**secondary** (west), because the pull always runs in the destination.
 
 | Job | Cadence | Tasks | Purpose |
 |---|---|---|---|
 | `dr_models_bootstrap` | manual (once/region) | `setup` | create UC control tables (audit + `dr_state`) in the local metastore |
-| `dr_models_replicate` | manual | `replicate` | one-off baseline (seed east from west) |
+| `dr_models_replicate` | manual | `replicate` | one-off baseline (seed west from east) |
 | `dr_models_cdc` | `${cdc_schedule_cron}` (15 min) | `cdc` → `health_check` | steady-state engine: incremental sync, then fail-loud validation |
 | `dr_models_health` | `${health_schedule_cron}` (hourly) | `health_check` | safety net — catches drift even if a CDC run never fired |
 | `dr_models_failover` | manual (`--action`) | `failover` | failover / failback (production action) |
-| `dr_models_drill_failover` | manual (EAST) | `drill_failover` | self-asserting failover drill (baseline→failover→simulate version) |
-| `dr_models_drill_failback` | manual (WEST) | `drill_failback` | self-asserting failback drill (reverse CDC→failback→verify) |
+| `dr_models_drill_failover` | manual (WEST) | `drill_failover` | self-asserting failover drill (baseline→failover→simulate version) |
+| `dr_models_drill_failback` | manual (EAST) | `drill_failback` | self-asserting failback drill (reverse CDC→failback→verify) |
 
 ```mermaid
 flowchart LR
-    subgraph east["SECONDARY (us-east-1) — bundle target: east"]
+    subgraph west["SECONDARY (us-west-2) — bundle target: west"]
       SCH[schedule<br/>every 15 min] --> CDC[task: cdc<br/>03_cdc.py]
       CDC --> HC[task: health_check<br/>05_health_check.py]
       HC -->|drift / FAILED rows| ALERT[email alert<br/>${alert_email}]
@@ -382,21 +398,21 @@ recent `FAILED` rows. On any problem it **raises** → the task fails → the jo
 
 ```bash
 # One-time auth (already done if the failover drill worked):
-databricks auth login --host https://fe-sandbox-ps-dr-wp-us-east-1.cloud.databricks.com --profile dr-east
-databricks auth login --host https://fe-sandbox-ps-dr-wp-us-west-2.cloud.databricks.com --profile dr-west
+databricks auth login --host https://fe-sandbox-ankita-dr-wp-us-west-2.cloud.databricks.com --profile dr-west
+databricks auth login --host https://fe-sandbox-krish-us-eat-1-sandbox.cloud.databricks.com --profile dr-east
 
 # Validate + deploy to BOTH workspaces (schedules deploy PAUSED):
-databricks bundle validate -t east
-databricks bundle deploy   -t east
-databricks bundle deploy   -t west   # so failback + bootstrap jobs exist there too
+databricks bundle validate -t west
+databricks bundle deploy   -t west
+databricks bundle deploy   -t east   # so failback + bootstrap jobs exist there too
 
 # One-time: create the UC control tables (audit + dr_state) in BOTH metastores.
-databricks bundle run dr_models_bootstrap -t east
 databricks bundle run dr_models_bootstrap -t west
+databricks bundle run dr_models_bootstrap -t east
 
 # Baseline once, confirm it's clean, then flip schedules on:
-databricks bundle run dr_models_replicate -t east
-databricks bundle deploy -t east --var cdc_pause_status=UNPAUSED   # CDC + health now scheduled
+databricks bundle run dr_models_replicate -t west
+databricks bundle deploy -t west --var cdc_pause_status=UNPAUSED   # CDC + health now scheduled
 ```
 
 Override the alert address per deploy with `--var alert_email=you@databricks.com`.
@@ -408,3 +424,59 @@ Override the alert address per deploy with `--var alert_email=you@databricks.com
 - Replace the secret-scope PAT with a **service principal OAuth (M2M)** token; rotate it.
 - Schedules + failure alerts are already wired (§11); tune `cdc_schedule_cron` to your RPO.
 - Ensure the SPN has UC read in primary and write in secondary (and the reverse for failback).
+
+---
+
+## 13. Relationship to Databricks Managed DR
+
+Databricks **Managed DR** is the primary, first-party answer to cross-region
+resilience. This DIY framework is **complementary** — it covers only the objects
+Managed DR does not yet replicate, and is designed to run *after* a Managed DR
+failover rather than competing with it.
+
+### Who owns what
+
+| Capability | Managed DR (native) | DIY DR (this framework) |
+|---|---|---|
+| UC metadata + grants | yes | no (defers to Managed DR) |
+| Managed-table data | yes | no |
+| Workspace assets (growing set) | yes | no |
+| Stable workspace URL across failover | yes | no (uses Managed DR's, when present) |
+| Failover orchestration for covered assets | yes | no |
+| **ML models / versions / aliases / runs / experiments** | **no** | **yes** |
+| **Model serving endpoints** | **no** | **yes** (standby → activate) |
+| **MLflow 3 / GenAI (logged models, prompts, eval datasets, traces)** | **no** | **yes** (version-gated) |
+| Vector Search, Secrets, Delta Sharing, Volume data, Apps, Genie | no | planned modules |
+
+### Standalone, but compatible
+
+The DIY layer's failover/failback is driven by its **own `dr_state` table**
+(§9), with **no hard dependency** on any Managed DR API. That means it works in
+workspaces with or without Managed DR. A `common/managed_dr.py` **no-op seam**
+(`is_managed_dr_enabled`, `correlate_failover_event`, `on_failover`) marks where a
+future integration would converge both layers on a single failover signal — today
+it does nothing and is safe to call.
+
+### Run-after-failover sequence (Managed-DR shop)
+
+```mermaid
+flowchart TD
+    MDR[Managed DR fails workspace over to secondary<br/>UC metadata/grants + table data + stable URL] --> Seam[managed_dr.on_failover seam<br/>align dr_state to the promoted region]
+    Seam --> DIYFO[DIY failover: promote standby models +<br/>activate serving endpoints in the new active region]
+    DIYFO --> CDC[Steady-state CDC resumes in the new direction]
+    CDC --> Back{Home region recovers}
+    Back --> FB[Managed DR fails back, then DIY failback<br/>resyncs models/endpoints to home + resets dr_state]
+```
+
+### RPO / RTO notes
+
+- **RPO (models):** the CDC schedule interval (`cdc_schedule_cron`, default 15 min)
+  for steady-state changes. At a real disaster you do **not** pull from a downed
+  primary — the secondary is promoted at whatever the last successful CDC achieved.
+  The audit table's `source_event_time` / `rpo_lag_sec` make the actual lag visible.
+- **RTO (models):** the time to promote the standby (no data movement on failover)
+  plus serving-endpoint scale-up and consumer re-routing. Because the secondary is a
+  *warm* mirror with version numbers preserved, promotion is fast.
+- **Coverage gap is explicit:** anything in the "planned modules" rows above is not
+  yet protected by DIY DR; that gap is tracked per object type so customers know
+  exactly what is and isn't covered until Managed DR closes it natively.

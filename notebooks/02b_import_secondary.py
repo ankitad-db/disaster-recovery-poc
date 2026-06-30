@@ -7,10 +7,6 @@
 # MAGIC workspace -- no cross-region credentials needed.
 
 # COMMAND ----------
-# MAGIC %pip install "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import@master"
-# MAGIC dbutils.library.restartPython()
-
-# COMMAND ----------
 # MAGIC %run ./_bootstrap
 
 # COMMAND ----------

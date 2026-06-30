@@ -57,7 +57,6 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - "git+https://github.com/mlflow/mlflow-export-import@master"
               - -e ..
       max_concurrent_runs: 1
       queue:
@@ -74,6 +73,19 @@ resources:
         quartz_cron_expression: ${var.cdc_schedule_cron}
         timezone_id: UTC
         pause_status: ${var.cdc_pause_status}
+      # NEAR-REAL-TIME (paused for the POC): a Model Update Trigger fires the same
+      # CDC entry point within seconds of a UC model version/alias change on the
+      # PRIMARY, instead of waiting for the cron. This is the event-driven analogue
+      # of the system.access.audit scan the changefeed already performs. Uncomment
+      # and set the in-scope model name(s) to enable; keep the schedule above as the
+      # safety-net backstop.
+      #   trigger:
+      #     pause_status: PAUSED
+      #     model:
+      #       # Fires when a new READY version is created or an alias is set.
+      #       condition: MODEL_VERSION_READY      # | MODEL_ALIAS_SET
+      #       min_time_between_triggers_seconds: 300
+      #       securable_name: dr_poc.ml.iris_dr_model
       email_notifications:
         on_failure: ["${var.alert_email}"]
       tasks:
@@ -92,7 +104,6 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - "git+https://github.com/mlflow/mlflow-export-import@master"
               - -e ..
       max_concurrent_runs: 1
       queue:
@@ -122,7 +133,6 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - "git+https://github.com/mlflow/mlflow-export-import@master"
               - -e ..
       max_concurrent_runs: 1
       queue:
@@ -152,7 +162,6 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - "git+https://github.com/mlflow/mlflow-export-import@master"
               - -e ..
 
     # DRILL: self-asserting failover/failback test. Two jobs because the drill is
@@ -176,7 +185,6 @@ resources:
             client: "2"
             dependencies:
               - scikit-learn
-              - "git+https://github.com/mlflow/mlflow-export-import@master"
               - -e ..
       queue:
         enabled: true
@@ -198,7 +206,6 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - "git+https://github.com/mlflow/mlflow-export-import@master"
               - -e ..
       queue:
         enabled: true
@@ -222,7 +229,6 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - "git+https://github.com/mlflow/mlflow-export-import@master"
               - -e ..
       queue:
         enabled: true
@@ -244,7 +250,6 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - "git+https://github.com/mlflow/mlflow-export-import@master"
               - -e ..
       queue:
         enabled: true

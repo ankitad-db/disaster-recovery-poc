@@ -23,7 +23,7 @@ import os
 import time
 
 from ...common import engine, storage
-from ...common.audit import AuditRow
+from ...common.audit import AuditRow, IdMappingLog, rows_from_import_result
 from ...core.base import RunContext
 from ._selection import resolve_models
 
@@ -95,13 +95,21 @@ def run_replicate(
 
     ts = storage.new_timestamp()
     rel = storage.rel_export_dir(cfg, direction, ts)
-    base_out = storage.dbfs_path(rel)  # local (destination) DBFS bucket
+    base_out = storage.dbfs_path(rel, cfg)  # local (destination) staging volume / DBFS root
     exp_base = cfg.models.get("dest_experiment_base", "/Shared/dr/experiments")
     export_version_model = cfg.models.get("export_version_model", True)
     export_permissions = cfg.models.get("export_permissions", True)
+    max_workers = _int(cfg.models.get("max_workers", 1))
+    notebook_formats = _csv(cfg.models.get("notebook_formats", "SOURCE"))
+    prompt_names = cfg.models.get("prompts", []) or []
+    eval_dataset_names = cfg.models.get("evaluation_datasets", []) or []
+    replicate_traces = bool(cfg.models.get("replicate_traces", False))
+    notebook_dest_dir = cfg.models.get("notebook_dest_dir")
+    trig = _trigger_type(ctx.triggered_by)
 
     # --- EXPORT phase: become the remote source ---
     src_versions: dict[str, list[int]] = {}
+    src_bytes: dict[str, int] = {}
     with _ambient_identity(host, token):
         models = models_override or resolve_models(LOCAL_REGISTRY, cfg.models.get("include", []))
         if not models:
@@ -110,24 +118,31 @@ def run_replicate(
             out_dir = f"{base_out}/models/{model}"
             erow = AuditRow(
                 operation="EXPORT", direction=direction.label, model_name=model,
+                object_type="model", action="UPDATE", trigger_type=trig,
                 triggered_by=ctx.triggered_by, export_dir=out_dir,
+                manifest_path=f"{out_dir}/manifest.json",
                 tool_version=engine.engine_version(), actor=cfg.service_principal,
             )
             audit.insert(erow)
             t0 = time.time()
             try:
                 if not ctx.dry_run:
-                    engine.export_model(
+                    man = engine.export_model(
                         model=model, output_dir=out_dir, registry_uri=LOCAL_REGISTRY,
                         backend=cfg.engine_backend,
                         export_version_model=export_version_model,
                         export_permissions=export_permissions,
+                        notebook_formats=notebook_formats, max_workers=max_workers,
+                        prompt_names=prompt_names, eval_dataset_names=eval_dataset_names,
+                        replicate_traces=replicate_traces,
                     )
                     src_versions[model] = _list_versions(LOCAL_REGISTRY, model)
+                    src_bytes[model] = man.total_bytes() if man is not None else 0
                 audit.update_status(
                     erow.audit_id, "SUCCESS",
                     source_version=_max_str(src_versions.get(model)),
                     artifact_count=len(src_versions.get(model, [])),
+                    bytes_moved=src_bytes.get(model),
                     duration_sec=round(time.time() - t0, 2),
                 )
             except Exception as e:  # noqa: BLE001
@@ -143,26 +158,31 @@ def run_replicate(
             exp_name = f"{exp_base}/{model.replace('.', '_')}"
             irow = AuditRow(
                 operation="IMPORT", direction=direction.label, model_name=model,
+                object_type="model", action="UPDATE", trigger_type=trig,
                 triggered_by=ctx.triggered_by, export_dir=in_dir,
-                experiment_name=exp_name, source_version=_max_str(src_versions.get(model)),
+                manifest_path=f"{in_dir}/manifest.json",
+                experiment_name=exp_name, dst_experiment=exp_name,
+                source_version=_max_str(src_versions.get(model)),
+                bytes_moved=src_bytes.get(model),
                 tool_version=engine.engine_version(), actor=cfg.service_principal,
             )
             audit.insert(irow)
             t1 = time.time()
             try:
                 if not ctx.dry_run:
-                    engine.import_model(
+                    result = engine.import_model(
                         model=model, input_dir=in_dir, experiment_name=exp_name,
                         registry_uri=LOCAL_REGISTRY, backend=cfg.engine_backend,
                         delete_model=delete_model,
                         import_permissions=export_permissions,
-                        # UC forbids '.' in model-version tag keys; the engine's
-                        # source tags (mlflow_exim.field.*) violate that and make
-                        # create_model_version 400. Provenance lives in the audit table.
+                        # UC forbids '.' in model-version tag keys; the engine guards
+                        # this. Provenance also lives in the audit table.
                         import_source_tags=False,
+                        max_workers=max_workers, notebook_dest_dir=notebook_dest_dir,
                     )
                     _verify_import(model, src_versions.get(model, []))
                     dst = _list_versions(LOCAL_REGISTRY, model)
+                    _persist_id_mapping(ctx, result, irow.audit_id)
                 else:
                     dst = []
                 audit.update_status(
@@ -174,6 +194,36 @@ def run_replicate(
                 raise
 
 
+def _persist_id_mapping(ctx: RunContext, result, audit_id: str) -> None:
+    """Record source<->dest experiment/run/version IDs into ``dr_id_mapping``.
+
+    Names match across workspaces but the numeric IDs are workspace-local; this
+    persists the correspondence. Non-fatal: a mapping write must never fail an
+    otherwise-good replication (the audit table remains the source of truth).
+    """
+    if result is None:
+        return
+    audit = ctx.audit
+    try:
+        mlog = IdMappingLog(
+            ctx.cfg.mapping_table, spark=getattr(audit, "spark", None),
+            workspace_client=getattr(audit, "wc", None),
+            warehouse_id=getattr(audit, "warehouse_id", None),
+        )
+        rows = rows_from_import_result(
+            result,
+            direction_label=ctx.direction.label,
+            source_workspace=ctx.direction.source.workspace,
+            target_workspace=ctx.direction.dest.workspace,
+            audit_id=audit_id,
+        )
+        mlog.insert_many(rows)
+    except Exception as e:  # noqa: BLE001 - mapping is auxiliary, never fatal
+        import logging
+
+        logging.getLogger(__name__).warning("id-mapping persist skipped: %s", e)
+
+
 def _list_versions(registry_uri: str, model: str) -> list[int]:
     from ...common.clients import make_mlflow_client
 
@@ -183,6 +233,30 @@ def _list_versions(registry_uri: str, model: str) -> list[int]:
 
 def _max_str(versions: list[int] | None) -> str | None:
     return str(max(versions)) if versions else None
+
+
+def _int(v, default: int = 1) -> int:
+    try:
+        return max(1, int(v))
+    except (TypeError, ValueError):
+        return default
+
+
+def _csv(v) -> str:
+    """Normalize a notebook_formats config value (list or str) to a CSV string."""
+    if isinstance(v, (list, tuple)):
+        return ",".join(str(x) for x in v)
+    return str(v or "SOURCE")
+
+
+def _trigger_type(triggered_by: str) -> str:
+    """Map the legacy triggered_by enum to the detailed trigger_type enum."""
+    return {
+        "MANUAL": "MANUAL",
+        "SCHEDULE": "SCHEDULE",
+        "AUDIT_EVENT": "AUDIT_SCAN",
+        "MODEL_TRIGGER": "MODEL_TRIGGER",
+    }.get(triggered_by, "MANUAL")
 
 
 def _verify_import(model: str, expected: list[int]) -> None:

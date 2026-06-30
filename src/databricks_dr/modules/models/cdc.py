@@ -1,15 +1,19 @@
-"""Incremental CDC sync (watermark-gated, cross-workspace pull).
+"""Incremental CDC sync (change-feed driven, watermark-gated, cross-workspace pull).
 
 Steady-state DR. Runs in the LOCAL (destination) workspace, just like
-``replicate``. For each in-scope model it compares the source's max version
-(read under the remote identity) against the per-model watermark in the local
-audit table, and re-replicates only the models that changed. Re-replication uses
-the proven full-model pull with ``delete_model=True`` (clean overwrite, so no
-duplicate versions) -- robust for models, where artifacts are small.
+``replicate``. Change detection is delegated to
+:mod:`databricks_dr.common.native.changefeed`, which combines a
+``system.access.audit`` event scan (the same signal Managed DR reacts to) with an
+authoritative registry diff. Only the models that changed are re-replicated, using
+the proven full-model pull with ``delete_model=True`` (clean overwrite, no
+duplicate versions).
 
-This is "incremental" at the scheduling granularity: unchanged models are
-skipped, so a 15-minute schedule is cheap and idempotent. The watermark is
-advanced by writing a per-model VERIFY row after a successful sync.
+POC trigger = a manual notebook/job run. A scheduled job and a Model Update Trigger
+are defined (paused) in ``resources/dr_models_jobs.yml`` for later enablement; when
+enabled they call this exact same entry point.
+
+The per-model watermark is advanced by writing a VERIFY row after a successful sync;
+the audit-scan watermark is carried on that row (``source_event_time``) for RPO.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from __future__ import annotations
 from ...common.audit import AuditRow
 from ...common.clients import make_mlflow_client
 from ...common.logging import get_logger
+from ...common.native import changefeed
 from ...core.base import RunContext
 from . import replicate
 from ._selection import resolve_models
@@ -27,41 +32,65 @@ _logger = get_logger(__name__)
 def run_cdc(ctx: RunContext) -> None:
     cfg, direction, audit = ctx.cfg, ctx.direction, ctx.audit
     host, token = replicate._remote_creds(ctx)
+    catalog = cfg.uc.get("catalog")
+    schema = cfg.uc.get("schema")
+    since = _last_scan_watermark(audit)
 
-    # --- detect changed models under the REMOTE identity ---
-    changed: dict[str, int] = {}
+    # The system.access.audit scan is only meaningful when the audit stream visible
+    # to this job actually carries the SOURCE's model events (e.g. the source-side or
+    # a shared-account deployment). In the default cross-account pull topology the
+    # local audit stream carries the *import* events, which would cause spurious
+    # resyncs -- so the scan is OFF by default and the authoritative registry diff is
+    # used. Flip `models.cdc_use_system_tables: true` once the scan targets the source.
+    use_sys_tables = bool(cfg.models.get("cdc_use_system_tables", False))
+    scan_spark = ctx.spark if use_sys_tables else None
+
+    # --- detect changed models under the REMOTE (source) identity ---
     with replicate._ambient_identity(host, token):
         client = make_mlflow_client(replicate.LOCAL_REGISTRY)
-        for model in resolve_models(replicate.LOCAL_REGISTRY, cfg.models.get("include", [])):
-            source_max = _max_version(client, model)
-            watermark = audit.watermark(model)
-            if source_max > watermark:
-                changed[model] = source_max
-                _logger.info("%s: source v%s > watermark v%s -> sync", model, source_max, watermark)
-            else:
-                _logger.info("%s: up to date (v%s)", model, watermark)
+        models = resolve_models(replicate.LOCAL_REGISTRY, cfg.models.get("include", []))
+        result = changefeed.detect_changes(
+            client=client, models=models, watermark_fn=audit.watermark,
+            spark=scan_spark, catalog=catalog, schema=schema, since_iso=since,
+        )
 
-    if not changed:
-        _logger.info("CDC: nothing to sync (%s)", direction.label)
+    if not result.changed:
+        _logger.info("CDC: nothing to sync (%s, detector=%s)", direction.label, result.detector)
         return
 
-    # --- replicate only the changed models (full overwrite, no duplicates) ---
-    replicate.run_replicate(ctx, full=False, delete_model=True, models_override=list(changed))
+    _logger.info("CDC: %d changed model(s) via %s -> %s",
+                 len(result.changed), result.detector, ", ".join(result.changed))
 
-    # --- advance the watermark per model ---
-    for model, source_max in changed.items():
+    # --- replicate only the changed models (full overwrite, no duplicates) ---
+    replicate.run_replicate(ctx, full=False, delete_model=True, models_override=list(result.changed))
+
+    # --- advance the watermark per model, correlating the triggering audit event ---
+    for model, source_max in result.changed.items():
+        ev = result.events.get(model)
         audit.insert(AuditRow(
             operation="VERIFY", direction=direction.label, model_name=model,
-            source_version=str(source_max), status="SUCCESS", triggered_by=ctx.triggered_by,
+            source_version=str(source_max), status="SUCCESS",
+            triggered_by="AUDIT_EVENT" if ev else ctx.triggered_by,
             actor=cfg.service_principal,
         ))
 
 
-def _max_version(client, model: str) -> int:
+def _last_scan_watermark(audit) -> str | None:
+    """Latest correlated audit event_time we have recorded (None on first run).
+
+    Used to bound the next ``system.access.audit`` scan. Falls back to the
+    changefeed's default lookback window when unavailable.
+    """
     try:
-        versions = client.search_model_versions(f"name='{model}'")
+        sql = (
+            f"SELECT MAX(event_time) AS wm FROM {audit.table} "
+            f"WHERE triggered_by = 'AUDIT_EVENT'"
+        )
+        res = audit._execute(sql)
+        if res is not None and hasattr(res, "collect"):
+            rows = res.collect()
+            if rows and rows[0][0] is not None:
+                return str(rows[0][0])
     except Exception as e:  # noqa: BLE001
-        _logger.error("Cannot list versions for %s: %s", model, e)
-        return 0
-    nums = [int(v.version) for v in versions]
-    return max(nums) if nums else 0
+        _logger.debug("scan watermark lookup failed: %s", e)
+    return None

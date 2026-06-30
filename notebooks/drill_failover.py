@@ -9,7 +9,7 @@
 # MAGIC After this, run `drill_failback` in **WEST** to recover and restore steady state.
 
 # COMMAND ----------
-# MAGIC %pip install scikit-learn "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import@master"
+# MAGIC %pip install scikit-learn
 # MAGIC dbutils.library.restartPython()
 
 # COMMAND ----------

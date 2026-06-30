@@ -1,16 +1,20 @@
 # Databricks Asset Bundle for the DR framework.
 # Deploys the repo + scheduled DR workflows to a target workspace.
 #
-#   databricks bundle validate -t east
-#   databricks bundle deploy   -t east       # secondary (us-east-1): steady-state DR jobs
-#   databricks bundle deploy   -t west       # primary (us-west-2): for failback jobs
+# Current topology (config/dr_config.yaml): primary = east (krish),
+# secondary = west (ankita). Steady-state jobs run in the SECONDARY (they pull from
+# the primary), so `west` is the day-to-day deploy/run target; `east` is failback.
+#
+#   databricks bundle validate -t west
+#   databricks bundle deploy   -t west       # secondary (us-west-2): steady-state DR jobs
+#   databricks bundle deploy   -t east       # primary  (us-east-1): for failback jobs
 #
 # Go live (unpause schedules):
-#   databricks bundle deploy -t east --var cdc_pause_status=UNPAUSED
+#   databricks bundle deploy -t west --var cdc_pause_status=UNPAUSED
 # Run a job on demand:
-#   databricks bundle run dr_models_replicate -t east     # baseline
-#   databricks bundle run dr_models_cdc -t east           # one CDC+health pass
-#   databricks bundle run dr_models_failover -t east -- --action failover
+#   databricks bundle run dr_models_replicate -t west     # baseline (in secondary)
+#   databricks bundle run dr_models_cdc -t west           # one CDC+health pass
+#   databricks bundle run dr_models_failover -t west -- --action failover
 #
 # Each target maps to a CLI profile from `databricks auth login ... --profile`.
 
@@ -47,18 +51,19 @@ variables:
     description: SQL warehouse id used for audit-table writes (optional).
     default: ""
 
-# The steady-state DR jobs live in the SECONDARY (they pull from the primary), so
-# `east` is the day-to-day deploy target. `west` is the failback target.
+# The steady-state DR jobs live in the SECONDARY (they pull from the primary). With
+# the current topology that is `west`, so it is the default day-to-day target;
+# `east` (home primary) is the failback target. Hosts match config/dr_config.yaml.
 targets:
-  east:
+  west:
     default: true
     mode: development
     workspace:
-      profile: dr-east
-      host: https://fe-sandbox-ps-dr-wp-us-east-1.cloud.databricks.com
+      profile: dr-west
+      host: https://fe-sandbox-ankita-dr-wp-us-west-2.cloud.databricks.com
 
-  west:
+  east:
     mode: development
     workspace:
-      profile: dr-west
-      host: https://fe-sandbox-ps-dr-wp-us-west-2.cloud.databricks.com
+      profile: dr-east
+      host: https://fe-sandbox-krish-us-eat-1-sandbox.cloud.databricks.com

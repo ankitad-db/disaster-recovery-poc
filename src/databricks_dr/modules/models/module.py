@@ -17,8 +17,8 @@ class ModelsDRModule(BaseDRModule):
 
     def seed(self) -> None:
         # Seeds the active primary registry. Requires an ML cluster (notebook/job).
-        model_name = seed.seed_primary(self.cfg)
-        self.log.info("Seeded primary with %s", model_name)
+        names = seed.seed_models(self.cfg)
+        self.log.info("Seeded primary with %d model(s): %s", len(names), ", ".join(names))
 
     def baseline(self) -> None:
         baseline.run_baseline(self.ctx)

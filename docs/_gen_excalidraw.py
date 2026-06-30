@@ -83,12 +83,12 @@ SEC_S, SEC_BG = "#9c36b5", "#f8f0fc"
 text(700, 30, "Databricks Model DR — Cross-Workspace Pull (no CRR)", size=30, color="#1e1e1e", bold=True)
 text(700, 78, "Replicates UC models + versions, experiments/runs, grants & serving endpoints. Audit + dr_state control plane.", size=16, color="#495057")
 
-# ---------- WEST (PRIMARY) ----------
+# ---------- EAST (PRIMARY) ----------
 rect(60, 140, 900, 940, WEST_S, WEST_BG)
-text(90, 158, "PRIMARY · us-west-2", size=22, color=WEST_S, bold=True)
-text(90, 192, "fe-sandbox-ps-dr-wp-us-west-2   ·   metastore: ad-dr-metastore-us-west-2", size=13, color="#495057")
+text(90, 158, "PRIMARY · us-east-1", size=22, color=WEST_S, bold=True)
+text(90, 192, "fe-sandbox-krish-us-eat-1-sandbox   ·   metastore: ad-dr-metastore-us-east-1", size=13, color="#495057")
 
-# West UC / registry
+# East UC / registry
 rect(95, 235, 540, 300, WEST_S, "#ffffff")
 text(115, 248, "Unity Catalog  ·  catalog: dr_poc", size=15, color=WEST_S, bold=True)
 rect(120, 285, 490, 95, WEST_S, WEST_BG)
@@ -98,7 +98,7 @@ rect(120, 392, 490, 120, WEST_S, WEST_BG)
 text(135, 402, "Experiments · Runs · Artifacts", size=14, bold=True)
 text(135, 428, "backing run (params/metrics)\nmodel artifacts in UC managed storage (S3)\nsignature · input_example", size=12, color="#495057")
 
-# West control plane
+# East control plane
 rect(655, 235, 280, 300, CTL_S, "#ffffff")
 text(675, 248, "Control plane  ·  dr_control", size=14, color=CTL_S, bold=True)
 rect(675, 288, 240, 95, CTL_S, CTL_BG)
@@ -106,31 +106,31 @@ text(688, 298, "dr_replication_audit", size=13, bold=True)
 text(688, 322, "every EXPORT/IMPORT/VERIFY\nGRANTS/ENDPOINT/HEALTH\n+ CDC watermark", size=11, color="#495057")
 rect(675, 398, 240, 110, CTL_S, CTL_BG)
 text(688, 408, "dr_state (single row)", size=13, bold=True)
-text(688, 432, "active_primary = west\nfailover/failback flips it\n(read by every job run)", size=11, color="#495057")
+text(688, 432, "active_primary = east\nfailover/failback flips it\n(read by every job run)", size=11, color="#495057")
 
-# West serving endpoint
+# East serving endpoint
 rect(95, 560, 400, 110, WEST_S, "#ffffff")
 text(115, 572, "Model Serving endpoint (ACTIVE)", size=14, bold=True)
 text(115, 598, "iris-dr-endpoint  →  dr_poc.ml.iris_dr_model:vN\nserves consumer REST traffic", size=12, color="#495057")
 
-# West DBFS
+# East DBFS
 rect(515, 560, 420, 110, WEST_S, "#ffffff")
-text(535, 572, "DBFS root bucket (west)", size=14, bold=True)
-text(535, 598, "ps-dr-wp-us-west-2-…-dbfs-bucket--xmsr4h\n(source artifacts read in EXPORT phase)", size=12, color="#495057")
+text(535, 572, "Source artifact storage (primary)", size=14, bold=True)
+text(535, 598, "UC managed storage (S3)\n(source artifacts read in EXPORT phase)", size=12, color="#495057")
 
-# West failback secret scope (used only on failback)
+# East failback secret scope (used only on failback)
 rect(95, 700, 840, 90, SEC_S, "#ffffff")
-text(115, 712, "Secret scope: dr_remote_east   (used only during FAILBACK)", size=13, color=SEC_S, bold=True)
-text(115, 738, "host + ad-dr-spn PAT for EAST  →  lets WEST pull east→west to recover outage-time versions", size=12, color="#495057")
+text(115, 712, "Secret scope: dr_remote_west   (used only during FAILBACK)", size=13, color=SEC_S, bold=True)
+text(115, 738, "host + ad-dr-spn PAT for WEST  →  lets EAST pull west→east to recover outage-time versions", size=12, color="#495057")
 
 text(95, 820, "Identity: ad-dr-spn (account-admin SPN, present in both workspaces)", size=12, color="#495057")
-text(95, 980, "On FAILBACK this region is the DESTINATION:\nthe DR job runs HERE, pulls east→west, resets dr_state=west.", size=12, color=WEST_S)
+text(95, 980, "On FAILBACK this region is the DESTINATION:\nthe DR job runs HERE, pulls west→east, resets dr_state=east.", size=12, color=WEST_S)
 
-# ---------- EAST (SECONDARY) ----------
+# ---------- WEST (SECONDARY) ----------
 EX = 1480
 rect(EX, 140, 920, 940, EAST_S, EAST_BG)
-text(EX + 30, 158, "SECONDARY · us-east-1   (steady-state DR runs HERE)", size=22, color=EAST_S, bold=True)
-text(EX + 30, 192, "fe-sandbox-ps-dr-wp-us-east-1   ·   metastore: ad-dr-metastore-us-east-1", size=13, color="#495057")
+text(EX + 30, 158, "SECONDARY · us-west-2   (steady-state DR runs HERE)", size=22, color=EAST_S, bold=True)
+text(EX + 30, 192, "fe-sandbox-ankita-dr-wp-us-west-2   ·   metastore: ad-dr-metastore-us-west-2", size=13, color="#495057")
 
 # DR engine / jobs box
 rect(EX + 30, 230, 860, 215, ENG_S, "#ffffff")
@@ -143,40 +143,40 @@ text(EX + 50, 270,
      size=12, color="#495057")
 rect(EX + 50, 372, 820, 58, ENG_S, ENG_BG)
 text(EX + 62, 382,
-     "engine = mlflow-export-import (pinned). EXPORT becomes remote (WEST) identity;\nIMPORT restores local (EAST) identity. Per-model export→import + verify.",
+     "engine = native (MLflow client + databricks-sdk). EXPORT becomes remote (EAST) identity;\nIMPORT restores local (WEST) identity. Per-model export→import + verify.",
      size=11, color="#495057")
 
-# East secret scope
+# West secret scope
 rect(EX + 30, 460, 860, 78, SEC_S, "#ffffff")
-text(EX + 50, 470, "Secret scope: dr_remote_west   (steady-state)", size=13, color=SEC_S, bold=True)
-text(EX + 50, 496, "host + ad-dr-spn PAT for WEST  →  the job authenticates to the primary to read its registry", size=12, color="#495057")
+text(EX + 50, 470, "Secret scope: dr_remote_east   (steady-state)", size=13, color=SEC_S, bold=True)
+text(EX + 50, 496, "host + ad-dr-spn PAT for EAST  →  the job authenticates to the primary to read its registry", size=12, color="#495057")
 
-# East DBFS
+# West DBFS
 rect(EX + 30, 556, 410, 110, EAST_S, "#ffffff")
-text(EX + 50, 568, "DBFS root bucket (east)", size=14, bold=True)
-text(EX + 50, 594, "ps-dr-wp-us-east-1-…-dbfs-bucket--s7yhiv\nexports land HERE (no cross-region copy)", size=12, color="#495057")
+text(EX + 50, 568, "Staging Volume (local / secondary)", size=14, bold=True)
+text(EX + 50, 594, "dr_poc.dr_control.dr_staging  (S3-backed UC Volume)\nexports land HERE (no cross-region copy)", size=12, color="#495057")
 
-# East registry
+# West registry
 rect(EX + 460, 556, 430, 220, EAST_S, "#ffffff")
-text(EX + 480, 568, "MLflow Model Registry (EAST)", size=14, bold=True)
+text(EX + 480, 568, "MLflow Model Registry (WEST)", size=14, bold=True)
 text(EX + 480, 594, "dr_poc.ml.iris_dr_model  →  v1..vN (imported)\nexperiments under /Shared/dr/experiments\ngrants mirrored (USE CATALOG/SCHEMA/EXECUTE)", size=12, color="#495057")
 rect(EX + 480, 678, 390, 78, EAST_S, EAST_BG)
 text(EX + 492, 688, "Serving endpoint (STANDBY → ACTIVE)", size=13, bold=True)
 text(EX + 492, 712, "iris-dr-endpoint mirrored scale-to-zero;\nfailover scales it up to serve", size=11, color="#495057")
 
-# East control plane (mirror)
+# West control plane (mirror)
 rect(EX + 30, 690, 410, 86, CTL_S, "#ffffff")
-text(EX + 50, 700, "dr_control (EAST): audit + dr_state", size=13, color=CTL_S, bold=True)
+text(EX + 50, 700, "dr_control (WEST): audit + dr_state", size=13, color=CTL_S, bold=True)
 text(EX + 50, 724, "independent copy; queryable after failover.\nwatermark drives incremental CDC.", size=11, color="#495057")
 
-text(EX + 30, 980, "Steady state: this region is the DESTINATION.\nThe job pulls west→east; dr_state stays 'west'.", size=12, color=EAST_S)
+text(EX + 30, 980, "Steady state: this region is the DESTINATION.\nThe job pulls east→west; dr_state stays 'east'.", size=12, color=EAST_S)
 
 # ---------- FLOW ARROWS (center) ----------
-# 1. EXPORT: EAST job reads WEST registry (remote identity)
-arrow(EX + 30, 320, 615, 330, color=ENG_S, label="1 · EXPORT  (ambient = WEST via dr_remote_west)")
-# 2. artifacts to EAST bucket
-arrow(615, 470, EX + 235, 556, color="#1e1e1e", label="2 · artifacts → local east bucket")
-# 3. IMPORT into EAST registry
+# 1. EXPORT: WEST job reads EAST registry (remote identity)
+arrow(EX + 30, 320, 615, 330, color=ENG_S, label="1 · EXPORT  (ambient = EAST via dr_remote_east)")
+# 2. artifacts to WEST bucket
+arrow(615, 470, EX + 235, 556, color="#1e1e1e", label="2 · artifacts → local staging Volume")
+# 3. IMPORT into WEST registry
 arrow(EX + 235, 620, EX + 460, 620, color=EAST_S, label="3 · IMPORT (local)")
 # 4. grants + endpoints mirror
 arrow(495, 615, EX + 460, 705, color="#1e1e1e", dashed=True, label="4 · grants + endpoint mirror (standby)")
@@ -187,19 +187,19 @@ arrow(EX + 230, 445, EX + 230, 690, color=CTL_S, dashed=True, label="5 · audit 
 rect(60, 1110, 2340, 150, "#e03131", "#fff5f5")
 text(90, 1122, "FAILOVER  &  FAILBACK", size=20, color="#e03131", bold=True)
 text(90, 1158,
-     "FAILOVER (run in EAST):  no pull (primary may be down) — east already warm; scale up endpoint; write FAILOVER row; dr_state → east.  Repoint consumers.",
+     "FAILOVER (run in WEST):  no pull (primary may be down) — west already warm; scale up endpoint; write FAILOVER row; dr_state → west.  Repoint consumers.",
      size=13, color="#495057")
 text(90, 1188,
-     "FAILBACK (run in WEST):  reverse CDC east→west via dr_remote_east pulls outage-time versions; write FAILBACK row; dr_state → west.  Steady state restored.",
+     "FAILBACK (run in EAST):  reverse CDC west→east via dr_remote_west pulls outage-time versions; write FAILBACK row; dr_state → east.  Steady state restored.",
      size=13, color="#495057")
 text(90, 1222,
-     "Direction is parameterized in Config.direction(): env override > dr_state table > config role. Same code runs both ways — no hardcoded west→east.",
+     "Direction is parameterized in Config.direction(): env override > dr_state table > config role. Same code runs both ways — no hardcoded east→west.",
      size=12, color="#e03131")
 
-# normal direction arrow (west primary -> east)
-arrow(970, 1075, EX + 20, 1075, color=EAST_S, label="steady-state CDC  west → east", lsize=14)
+# normal direction arrow (east primary -> west)
+arrow(970, 1075, EX + 20, 1075, color=EAST_S, label="steady-state CDC  east → west", lsize=14)
 # failback arrow
-arrow(EX + 20, 1095, 970, 1095, color="#e03131", dashed=True, label="failback  east → west", lsize=14)
+arrow(EX + 20, 1095, 970, 1095, color="#e03131", dashed=True, label="failback  west → east", lsize=14)
 
 doc = {"type": "excalidraw", "version": 2, "source": "databricks-dr",
        "elements": els,

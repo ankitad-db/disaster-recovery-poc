@@ -18,11 +18,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The replication engine. Pinned by commit for reproducibility.
-# Installed separately so it is never committed to this repo:
-#   pip install "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import@master"
-engine = [
-    "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import@master",
+# Seeding the POC model trains a small sklearn model (present on ML runtimes).
+seed = [
+    "scikit-learn>=1.3",
 ]
 dev = [
     "pytest>=7",

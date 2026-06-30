@@ -30,6 +30,10 @@ class RegionConfig:
     metastore: str
     workspace: str
     dbfs_bucket: str
+    # S3 URI of a pre-existing UC external location in THIS region, used to back the
+    # staging external Volume (serverless/shared-safe alternative to the DBFS root).
+    # Optional: when unset, staging falls back to the DBFS root (/dbfs).
+    external_location_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -65,6 +69,17 @@ class Config:
         return self._raw["storage"]
 
     @property
+    def staging_volume(self) -> str | None:
+        """3-level UC volume (``cat.schema.vol``) to stage export bundles on.
+
+        When set, bundles land on a governed, S3-backed external Volume reachable via
+        its ``/Volumes/...`` FUSE path (works on serverless + shared compute). When
+        unset, staging falls back to the DBFS root (``/dbfs``), which has no FUSE on
+        serverless/shared access modes.
+        """
+        return self.storage.get("staging_volume")
+
+    @property
     def models(self) -> Dict[str, Any]:
         return self._raw.get("models", {})
 
@@ -89,6 +104,18 @@ class Config:
         """Single-row control table holding the active-primary role (orchestration)."""
         return self.uc.get("state_table") or (
             f"{self.uc['catalog']}.{self.uc['control_schema']}.dr_state"
+        )
+
+    @property
+    def mapping_table(self) -> str:
+        """Control table mapping source<->destination MLflow IDs (experiment/run/version).
+
+        Names are identical across workspaces but the numeric experiment_id / run_id
+        are workspace-local, so this table records the source->target correspondence
+        for lineage stitching and cross-workspace lookups.
+        """
+        return self.uc.get("mapping_table") or (
+            f"{self.uc['catalog']}.{self.uc['control_schema']}.dr_id_mapping"
         )
 
     # ---- role / direction ------------------------------------------------------
@@ -124,6 +151,26 @@ class Config:
         if len(others) != 1:
             raise ValueError(f"Expected exactly one secondary region, got {others}")
         return others[0]
+
+    def local_region_key(self, workspace_url: str) -> str:
+        """Resolve which region this workspace is, by matching its URL to a host.
+
+        ``workspace_url`` is typically ``spark.conf.get('spark.databricks.workspaceUrl')``
+        (host only, no scheme). Lets a single setup notebook self-identify the local
+        region in either workspace.
+        """
+        def _norm(u: str) -> str:
+            return (u or "").replace("https://", "").replace("http://", "").strip("/").lower()
+
+        wu = _norm(workspace_url)
+        for key, rc in self.regions.items():
+            host = _norm(rc.host)
+            if host and wu and (host == wu or host.endswith(wu) or wu.endswith(host)):
+                return key
+        raise ValueError(
+            f"workspace_url {workspace_url!r} matches no region host "
+            f"({[(k, v.host) for k, v in self.regions.items()]})"
+        )
 
     def config_primary_key(self) -> str:
         """Region key with ``role: primary`` in config, ignoring any override.
