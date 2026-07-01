@@ -52,7 +52,7 @@ def _export_uc_grants(model: str) -> Dict[str, Any]:
     from databricks.sdk.service.catalog import SecurableType
 
     ws = WorkspaceClient()
-    grants = ws.grants.get(securable_type=SecurableType.FUNCTION, full_name=model)
+    grants = ws.grants.get(securable_type=SecurableType.REGISTERED_MODEL, full_name=model)
     assignments = []
     for pa in getattr(grants, "privilege_assignments", None) or []:
         assignments.append({
@@ -83,7 +83,7 @@ def _import_uc_grants(model: str, snapshot: Dict[str, Any]) -> None:
         # Apply one principal at a time so a single bad grant can't fail the batch.
         try:
             ws.grants.update(
-                securable_type=SecurableType.FUNCTION,
+                securable_type=SecurableType.REGISTERED_MODEL,
                 full_name=model,
                 changes=[PermissionsChange(principal=a["principal"], add=privs)],
             )

@@ -322,7 +322,15 @@ def _register_version(client, model: str, vrec: VersionRec, input_dir: str,
 
 
 def _stage_model_source(client, vrec: VersionRec, input_dir: str, dest_run_id: Optional[str]) -> Optional[str]:
-    """Upload the bundled model files under the dest run and return a runs:/ URI."""
+    """Upload the bundled model files under the dest run and return a runs:/ URI.
+
+    The staged copy is sanitized first (see :func:`_neutralize_logged_model_ref`) so
+    MLflow 3 does not try to resolve the *source* logged-model id embedded in
+    ``MLmodel`` against the destination workspace (which would 404).
+    """
+    import shutil
+    import tempfile
+
     candidates = [os.path.join(input_dir, vrec.rel_dir, "model")]
     if vrec.run_id:
         candidates.append(os.path.join(input_dir, "runs", vrec.run_id, "artifacts", "model"))
@@ -334,9 +342,51 @@ def _stage_model_source(client, vrec: VersionRec, input_dir: str, dest_run_id: O
         return None
 
     resolved = _artifacts.find_model_subdir(model_dir) or model_dir
+    # Copy to a local temp dir (never mutate the source bundle on the Volume) and drop
+    # the MLflow-3 logged-model linkage before uploading + registering.
+    tmp = tempfile.mkdtemp(prefix="dr_stage_")
+    staged = os.path.join(tmp, "model")
+    shutil.copytree(resolved, staged)
+    _neutralize_logged_model_ref(os.path.join(staged, "MLmodel"))
+
     artifact_path = f"dr_models/v{vrec.version}"
-    client.log_artifacts(dest_run_id, resolved, artifact_path=artifact_path)
+    client.log_artifacts(dest_run_id, staged, artifact_path=artifact_path)
+    shutil.rmtree(tmp, ignore_errors=True)
     return f"runs:/{dest_run_id}/{artifact_path}"
+
+
+def _neutralize_logged_model_ref(mlmodel_path: str) -> None:
+    """Strip the source ``model_id`` from an ``MLmodel`` file.
+
+    MLflow 3 stamps the source LoggedModel id into ``MLmodel`` (top-level and/or
+    under ``metadata``). On cross-workspace import ``register_model`` would try to
+    resolve that id in the destination and fail with NOT_FOUND. Removing it makes
+    the model self-contained; MLflow assigns a fresh logged model on registration.
+    """
+    if not os.path.isfile(mlmodel_path):
+        return
+    try:
+        import yaml
+
+        with open(mlmodel_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        changed = False
+        for key in ("model_id", "logged_model_id"):
+            if key in data:
+                data.pop(key)
+                changed = True
+        meta = data.get("metadata")
+        if isinstance(meta, dict):
+            for key in ("model_id", "logged_model_id"):
+                if key in meta:
+                    meta.pop(key)
+                    changed = True
+        if changed:
+            with open(mlmodel_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+            _logger.info("neutralized logged-model ref in %s", mlmodel_path)
+    except Exception as e:  # noqa: BLE001 - best effort; registration will surface real errors
+        _logger.debug("could not neutralize MLmodel %s: %s", mlmodel_path, e)
 
 
 def _apply_registered_model_metadata(client, model: str, man: Manifest) -> None:
