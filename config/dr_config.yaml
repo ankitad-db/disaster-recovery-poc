@@ -29,7 +29,8 @@ regions:
     external_location_url: s3://krish-us-eat-1-sandbox-ext-s3-332745928618-k6hevn/
 
 # Identity used for replication (account admin SPN, present in both workspaces).
-service_principal: ad-dr-spn
+# Reference by application-id (UC grants/run_as resolve SPNs by app-id, not display name).
+service_principal: dc5781bc-c86f-4808-a00c-930062f91f17
 
 # Unity Catalog naming, mirrored in BOTH metastores.
 uc:
