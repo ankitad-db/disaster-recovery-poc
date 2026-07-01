@@ -15,13 +15,14 @@ from ...common.clients import (
 )
 from ...common.audit import AuditRow
 from ...common.logging import get_logger
+from ...common.native._permissions import uc_grants_get, uc_grants_update
 from ...core.base import RunContext
 from . import replicate
 
 _logger = get_logger(__name__)
 
-# Securable level -> privileges we replicate for consumers.
-_LEVELS = ("CATALOG", "SCHEMA")
+# Securable level -> lowercase REST token we replicate for consumers.
+_LEVELS = ("catalog", "schema")
 
 
 def replicate_grants(ctx: RunContext) -> None:
@@ -44,8 +45,8 @@ def replicate_grants(ctx: RunContext) -> None:
     audit.insert(row)
     try:
         mirrored = 0
-        mirrored += _mirror(src, dst, "CATALOG", catalog, ctx.dry_run)
-        mirrored += _mirror(src, dst, "SCHEMA", f"{catalog}.{schema}", ctx.dry_run)
+        mirrored += _mirror(src, dst, "catalog", catalog, ctx.dry_run)
+        mirrored += _mirror(src, dst, "schema", f"{catalog}.{schema}", ctx.dry_run)
         audit.update_status(row.audit_id, "SUCCESS", artifact_count=mirrored)
     except Exception as e:  # noqa: BLE001
         audit.update_status(row.audit_id, "FAILED", error_message=str(e))
@@ -64,24 +65,25 @@ def _grant_clients(ctx: RunContext):
     return workspace_client(direction.source.profile), workspace_client(direction.dest.profile)
 
 
-def _mirror(src, dst, securable_type: str, full_name: str, dry_run: bool) -> int:
-    """Copy directly-assigned grants for one securable. Returns # principals mirrored."""
-    from databricks.sdk.service.catalog import (
-        PermissionsChange,
-        SecurableType,
-    )
+def _mirror(src, dst, securable: str, full_name: str, dry_run: bool) -> int:
+    """Copy directly-assigned grants for one securable. Returns # principals mirrored.
 
-    st = SecurableType(securable_type)
-    current = src.grants.get(securable_type=st, full_name=full_name)
-    changes = []
-    for assignment in (current.privilege_assignments or []):
-        changes.append(PermissionsChange(principal=assignment.principal,
-                                         add=list(assignment.privileges or [])))
+    ``securable`` is the lowercase REST token (``catalog`` / ``schema``). We use
+    the raw REST permissions endpoint rather than the typed SDK method: newer SDK
+    builds serialize the ``SecurableType`` enum into the path as
+    ``SecurableType.CATALOG``, which the server rejects.
+    """
+    assignments = uc_grants_get(src, securable, full_name)
+    changes = [
+        {"principal": a["principal"], "add": list(a.get("privileges") or [])}
+        for a in assignments
+        if a.get("privileges")
+    ]
     if not changes:
-        _logger.info("No grants to mirror for %s %s", securable_type, full_name)
+        _logger.info("No grants to mirror for %s %s", securable, full_name)
         return 0
-    _logger.info("Mirroring %d principal grants to %s %s", len(changes), securable_type, full_name)
+    _logger.info("Mirroring %d principal grants to %s %s", len(changes), securable, full_name)
     if dry_run:
         return len(changes)
-    dst.grants.update(securable_type=st, full_name=full_name, changes=changes)
+    uc_grants_update(dst, securable, full_name, changes)
     return len(changes)

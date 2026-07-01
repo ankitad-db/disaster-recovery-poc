@@ -304,7 +304,8 @@ Captured per import: every source **experiment** → the single per-model dest e
 every source **run** → its recreated dest run (with the version it backs); every source
 **version** → dest version.
 
-**View** `v_dr_id_mapping_latest` returns the newest mapping per `(id_type, source_id)`.
+**View** `v_dr_id_mapping_latest` returns the newest mapping per `(id_type, model_name, source_id)`
+(`model_name` is in the key because `model_version` source_ids like `1`/`2`/`3` repeat across models).
 
 ```sql
 -- east run_id -> west run_id for a model
@@ -330,7 +331,7 @@ WHERE id_type='experiment' AND model_name='dr_poc.ml.iris_dr_model';
 | `dr_state` | `state.py` (failover/failback) | single-row active-primary role; the direction source of truth. |
 | `v_dr_watermark` | view | `MAX(source_version)` synced per model. |
 | `v_dr_failures` | view | recent `FAILED` rows. |
-| `v_dr_id_mapping_latest` | view | newest ID mapping per `(id_type, source_id)`. |
+| `v_dr_id_mapping_latest` | view | newest ID mapping per `(id_type, model_name, source_id)`. |
 
 `system.access.audit` is the **only** system table read, and only as a CDC trigger signal
 (see `changefeed.py`); the registry diff is the correctness guarantee.

@@ -178,13 +178,16 @@ STATEMENTS = [
         FROM {AUDIT}
         WHERE status = 'FAILED'
         ORDER BY event_time DESC""",
-    # Latest source->target ID mapping per (id_type, source_id) — newest wins.
+    # Latest source->target ID mapping per (id_type, model_name, source_id) — newest
+    # wins. model_name is part of the key because model_version source_ids (1,2,3)
+    # repeat across models and would otherwise collapse into a single model.
     f"""CREATE OR REPLACE VIEW {CAT}.{CTL}.v_dr_id_mapping_latest AS
         SELECT id_type, model_name, object_name, source_id, target_id, source_version,
                source_workspace, target_workspace, direction, event_time
         FROM (
           SELECT *, ROW_NUMBER() OVER (
-                   PARTITION BY id_type, source_id ORDER BY event_time DESC) AS rn
+                   PARTITION BY id_type, model_name, source_id
+                   ORDER BY event_time DESC) AS rn
           FROM {MAPPING}
         ) WHERE rn = 1""",
 
