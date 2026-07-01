@@ -1,12 +1,12 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Drill · FAILOVER  (run in EAST / us-east-1)
-# MAGIC Self-asserting failover half of the DR drill. One run does the whole EAST side:
-# MAGIC baseline check → `failover` (scale up endpoints, persist `dr_state=east`, audit)
-# MAGIC → log a simulated "outage" model version in EAST. Then asserts the expected
+# MAGIC # Drill · FAILOVER  (run in WEST / us-west-2)
+# MAGIC Self-asserting failover half of the DR drill. One run does the whole WEST side:
+# MAGIC baseline check → `failover` (scale up endpoints, persist `dr_state=west`, audit)
+# MAGIC → log a simulated "outage" model version in WEST. Then asserts the expected
 # MAGIC state and **raises on failure** so the job task goes red.
 # MAGIC
-# MAGIC After this, run `drill_failback` in **WEST** to recover and restore steady state.
+# MAGIC After this, run `drill_failback` in **EAST** to recover and restore steady state.
 
 # COMMAND ----------
 # MAGIC %pip install scikit-learn
@@ -32,17 +32,17 @@ def versions(name):
 
 
 before = versions(MODEL)
-print("EAST versions before:", before)
+print("WEST versions before:", before)
 
 # COMMAND ----------
-# MAGIC %md ## 1. Failover — promote EAST
+# MAGIC %md ## 1. Failover — promote WEST
 # COMMAND ----------
 ctx = RunContext(cfg=cfg, direction=cfg.direction(spark=spark), triggered_by="MANUAL",  # noqa: F821
                  audit=AuditLog(cfg.audit_table, spark=spark), spark=spark, dbutils=dbutils)  # noqa: F821
 ModelsDRModule(ctx).failover()
 
 # COMMAND ----------
-# MAGIC %md ## 2. Simulate outage work — log a new version in EAST
+# MAGIC %md ## 2. Simulate outage work — log a new version in WEST
 # COMMAND ----------
 from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
@@ -57,7 +57,7 @@ with mlflow.start_run(run_name="drill-outage"):
                              signature=infer_signature(X, model.predict(X)), input_example=X.head())
 
 after = versions(MODEL)
-print("EAST versions after:", after)
+print("WEST versions after:", after)
 
 # COMMAND ----------
 # MAGIC %md ## 3. Assertions
@@ -68,14 +68,14 @@ failover_rows = spark.sql(  # noqa: F821
 ).collect()[0][0]
 
 problems = []
-if state != "east":
-    problems.append(f"dr_state active_primary={state}, expected east")
+if state != "west":
+    problems.append(f"dr_state active_primary={state}, expected west")
 if not after or (before and max(after) <= max(before)):
-    problems.append(f"no new EAST version (before={before}, after={after})")
+    problems.append(f"no new WEST version (before={before}, after={after})")
 if failover_rows < 1:
     problems.append("no successful FAILOVER audit row")
 
 if problems:
     raise AssertionError("FAILOVER DRILL FAILED: " + "; ".join(problems))
-print(f"FAILOVER DRILL PASSED — dr_state=east, new version {max(after)} in EAST. "
-      f"Now run drill_failback in WEST.")
+print(f"FAILOVER DRILL PASSED — dr_state=west, new version {max(after)} in WEST. "
+      f"Now run drill_failback in EAST.")

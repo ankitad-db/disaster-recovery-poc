@@ -1,23 +1,23 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 06 · Test serving-endpoint DR  (run in SECONDARY / us-east-1)
+# MAGIC # 06 · Test serving-endpoint DR  (run in SECONDARY / us-west-2)
 # MAGIC Exercises the two endpoint-DR phases against the real workspaces:
-# MAGIC `mirror` (steady state — recreate the WEST endpoint in EAST as scale-to-zero
+# MAGIC `mirror` (steady state — recreate the EAST endpoint in WEST as scale-to-zero
 # MAGIC standby) and `activate` (failover — scale it up). Pick the phase with the
 # MAGIC `action` widget. Verifies the result and prints the `ENDPOINT` audit rows.
 # MAGIC
 # MAGIC **Prerequisites**
-# MAGIC 1. A serving endpoint exists in **WEST** that serves an in-scope model
-# MAGIC    (`dr_poc.ml.iris_dr_model`). Create one in a WEST notebook:
+# MAGIC 1. A serving endpoint exists in **EAST** (primary) that serves an in-scope model
+# MAGIC    (`dr_poc.ml.iris_dr_model`). Create one in an EAST notebook:
 # MAGIC    ```python
 # MAGIC    from databricks.sdk import WorkspaceClient
 # MAGIC    from databricks.sdk.service.serving import EndpointCoreConfigInput, ServedEntityInput
 # MAGIC    w = WorkspaceClient(); NAME = "iris-dr-endpoint"
 # MAGIC    w.serving_endpoints.create(name=NAME, config=EndpointCoreConfigInput(name=NAME,
 # MAGIC        served_entities=[ServedEntityInput(entity_name="dr_poc.ml.iris_dr_model",
-# MAGIC            entity_version="4", workload_size="Small", scale_to_zero_enabled=True)]))
+# MAGIC            entity_version="2", workload_size="Small", scale_to_zero_enabled=True)]))
 # MAGIC    ```
-# MAGIC 2. The `dr_remote_west` secret scope exists in EAST (already set up for CDC).
+# MAGIC 2. The `dr_remote_east` secret scope exists in WEST (already set up for CDC).
 
 # COMMAND ----------
 # MAGIC %run ./_bootstrap
@@ -39,16 +39,16 @@ ctx = RunContext(
     audit=AuditLog(cfg.audit_table, spark=spark),    # noqa: F821
     triggered_by="MANUAL",
     spark=spark,                                     # noqa: F821
-    dbutils=dbutils,                                 # noqa: F821 (for dr_remote_west scope)
+    dbutils=dbutils,                                 # noqa: F821 (for dr_remote_east scope)
 )
 
 if action == "mirror":
-    print("mirrored:", endpoints.mirror_endpoints(ctx))   # WEST -> EAST standby (scale-to-zero)
+    print("mirrored:", endpoints.mirror_endpoints(ctx))   # EAST -> WEST standby (scale-to-zero)
 else:
-    print("activated:", endpoints.activate_endpoints(ctx))  # scale EAST endpoints up
+    print("activated:", endpoints.activate_endpoints(ctx))  # scale WEST endpoints up
 
 # COMMAND ----------
-# MAGIC %md ## Verify local (EAST) endpoint posture
+# MAGIC %md ## Verify local (WEST) endpoint posture
 # COMMAND ----------
 from databricks.sdk import WorkspaceClient
 

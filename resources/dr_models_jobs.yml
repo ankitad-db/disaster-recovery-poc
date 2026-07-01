@@ -1,6 +1,6 @@
 # DR jobs for the models module — the orchestration layer.
 #
-#  Steady state (deploy + run in the SECONDARY / us-east-1):
+#  Steady state (deploy + run in the SECONDARY / us-west-2):
 #    dr_models_replicate : one-off baseline full export/import (manual).
 #    dr_models_cdc       : scheduled incremental sync THEN health check (the engine).
 #    dr_models_health    : independent scheduled drift/failure scan (safety net).
@@ -39,7 +39,7 @@ resources:
         enabled: true
 
     # RECOMMENDED baseline: single-job cross-workspace pull. Run once on the
-    # SECONDARY to seed it from the primary registry via the dr_remote_west scope.
+    # SECONDARY (west) to seed it from the primary (east) registry via the dr_remote_east scope.
     dr_models_replicate:
       name: "[DR] models · replicate baseline (run in SECONDARY, pulls from primary)"
       tags: { dr_module: models, dr_phase: baseline }
@@ -138,7 +138,7 @@ resources:
       queue:
         enabled: true
 
-    # Manual failover / failback. action=failover (run in EAST) | failback (run in WEST).
+    # Manual failover / failback. action=failover (run in WEST/secondary) | failback (run in EAST/home primary).
     dr_models_failover:
       name: "[DR] models · failover / failback (manual)"
       tags: { dr_module: models, dr_phase: failover }
@@ -165,10 +165,10 @@ resources:
               - -e ..
 
     # DRILL: self-asserting failover/failback test. Two jobs because the drill is
-    # inherently two-sided -- failover runs in EAST, failback in WEST. Each raises
+    # inherently two-sided -- failover runs in WEST, failback in EAST. Each raises
     # on failure so a red run = drill failed.
     dr_models_drill_failover:
-      name: "[DR] models · DRILL failover (run in EAST)"
+      name: "[DR] models · DRILL failover (run in WEST)"
       tags: { dr_module: models, dr_phase: drill }
       run_as:
         service_principal_name: ad-dr-spn
@@ -190,7 +190,7 @@ resources:
         enabled: true
 
     dr_models_drill_failback:
-      name: "[DR] models · DRILL failback (run in WEST)"
+      name: "[DR] models · DRILL failback (run in EAST)"
       tags: { dr_module: models, dr_phase: drill }
       run_as:
         service_principal_name: ad-dr-spn

@@ -21,7 +21,10 @@ as new modules under `src/databricks_dr/modules/` without changing the core.
 - **Direction is parameterized:** failover/failback flip the role (in `dr_state`); the same code
   runs both ways. Consumer-facing extras (UC grants, serving endpoints) replicate alongside models.
 
-See the architecture and runbooks in [docs/architecture.md](docs/architecture.md).
+See the architecture in [docs/architecture.md](docs/architecture.md). For the **asserted,
+copy-paste end-to-end test** (seed → baseline → change → CDC → failover → failback, with
+pass/fail assertions at every step), follow **[docs/smoke_test_runbook.md](docs/smoke_test_runbook.md)** —
+that is the fastest way to validate a fresh deployment.
 
 ### Native engine — the API approach
 
@@ -115,6 +118,11 @@ docs/architecture.md     # flows, failover/failback, orchestration
 This is the end-to-end path for a brand-new user, run **interactively from notebooks** inside
 Databricks. No laptop setup is required — each notebook installs the engine and bootstraps its own
 `sys.path`.
+
+> **Testing end-to-end?** This section is the narrated walkthrough. For a tight, asserted checklist
+> of the same flow (with the exact SQL/Python to run and expected results at each step), use
+> **[docs/smoke_test_runbook.md](docs/smoke_test_runbook.md)**. Run order is always
+> **failover in WEST (secondary) → failback in EAST (home primary)**.
 
 ### 0. Prerequisites (one-time, by an admin)
 

@@ -1,10 +1,11 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 02b · Baseline Import  (run in SECONDARY / us-east-1)
-# MAGIC Imports models into this workspace's registry from the **secondary** DBFS
-# MAGIC bucket, resolving the export dir from `_latest.txt`. Run this only **after**
-# MAGIC the bucket bridge (CRR / `aws s3 sync`) has completed. Touches only this
-# MAGIC workspace -- no cross-region credentials needed.
+# MAGIC # 02b · Baseline Import  (run in SECONDARY / us-west-2)  — OPTIONAL split path
+# MAGIC Pairs with `02a` (the optional split path; prefer notebook `02` pull instead).
+# MAGIC Imports models into this (SECONDARY = **west**) workspace's registry from its
+# MAGIC `dr_staging` Volume, resolving the export dir from `_latest.txt`. Run this only
+# MAGIC **after** the bucket bridge (CRR / `aws s3 sync`) has completed. Touches only
+# MAGIC this workspace -- no cross-region credentials needed.
 
 # COMMAND ----------
 # MAGIC %run ./_bootstrap

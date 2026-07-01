@@ -1,12 +1,17 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 02a · Baseline Export  (run in PRIMARY / us-west-2)
-# MAGIC Exports all in-scope models (full history) from this workspace's registry to
-# MAGIC the **primary** DBFS bucket and writes `_latest.txt`. Touches only this
-# MAGIC workspace -- no cross-region credentials needed.
+# MAGIC # 02a · Baseline Export  (run in PRIMARY / us-east-1)  — OPTIONAL split path
+# MAGIC Alternative to notebook `02` (the **recommended** cross-workspace pull). Use the
+# MAGIC split path only when each region must run from its own Git folder and bundles
+# MAGIC are moved between buckets out-of-band.
+# MAGIC
+# MAGIC Exports all in-scope models (full history) from this (PRIMARY = **east**)
+# MAGIC workspace's registry into its `dr_staging` Volume and writes `_latest.txt`.
+# MAGIC Touches only this workspace -- no cross-region credentials needed.
 # MAGIC
 # MAGIC Next: bridge the bucket (S3 CRR, or `databricks-dr models bridge` from a host
-# MAGIC with both-account creds), then run `02b_import_secondary` in us-east-1.
+# MAGIC with both-account creds), then run `02b_import_secondary` in the SECONDARY
+# MAGIC (**west** / us-west-2).
 
 # COMMAND ----------
 # MAGIC %run ./_bootstrap

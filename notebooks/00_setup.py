@@ -34,6 +34,14 @@ LOCAL_KEY = cfg.local_region_key(WS_URL)
 LOCAL = cfg.regions[LOCAL_KEY]
 STAGING_VOLUME = cfg.staging_volume  # e.g. dr_poc.dr_control.dr_staging  (None => DBFS root)
 
+# Catalog MANAGED LOCATION: where managed tables/models land. On metastores WITHOUT a
+# root storage credential, a catalog created without this can't allocate managed storage
+# (DAC_DOES_NOT_EXIST). When the region has an external location, point the catalog's
+# managed storage at a 'dr_managed' subpath there (separate from the staging volume).
+# NOTE: managed location is settable only at CREATE time — to add it to an existing
+# catalog, DROP CATALOG ... CASCADE and re-run.
+_managed_loc = (LOCAL.external_location_url.rstrip("/") + "/dr_managed") if LOCAL.external_location_url else None
+
 # Build the external-volume DDL only when a staging volume + region S3 location are
 # configured. LOCATION is a 'dr_staging' subpath under this region's external location.
 VOLUME_STMTS = []
@@ -71,12 +79,19 @@ if STAGING_VOLUME:
 
 STATEMENTS = [
     # --- namespace ---
-    f"CREATE CATALOG IF NOT EXISTS {CAT} COMMENT 'Disaster Recovery POC catalog'",
+    # Include MANAGED LOCATION when a region external location is configured so managed
+    # tables work even on metastores without a root storage credential. (Only applied on
+    # first CREATE; an already-existing catalog keeps whatever it was created with.)
+    (f"CREATE CATALOG IF NOT EXISTS {CAT} MANAGED LOCATION '{_managed_loc}' "
+     f"COMMENT 'Disaster Recovery POC catalog'"
+     if _managed_loc else
+     f"CREATE CATALOG IF NOT EXISTS {CAT} COMMENT 'Disaster Recovery POC catalog'"),
     f"CREATE SCHEMA IF NOT EXISTS {CAT}.{SCH} COMMENT 'Replicated models, experiments and runs'",
     f"CREATE SCHEMA IF NOT EXISTS {CAT}.{CTL} COMMENT 'DR control plane: audit + state'",
 
-    # --- staging volume (S3-backed; serverless/shared-safe export landing zone) ---
-    *VOLUME_STMTS,
+    # NOTE: the staging external Volume is created in its own tolerant step below
+    # (it needs CREATE EXTERNAL VOLUME on the external location, which a less-privileged
+    # runner may lack — that must not block the control-plane tables).
 
     # --- audit table (source of truth for what replicated + CDC watermark) ---
     f"""CREATE TABLE IF NOT EXISTS {AUDIT} (
@@ -200,6 +215,41 @@ for sql in STATEMENTS:
             print("skip (columns already present):", preview)
         else:
             raise
+
+
+def _external_location_name_for(url):  # best-effort: map an S3 url -> external location name
+    try:
+        u = (url or "").rstrip("/")
+        for r in spark.sql("SHOW EXTERNAL LOCATIONS").collect():  # noqa: F821
+            d = r.asDict()
+            loc_url = (d.get("url") or "").rstrip("/")
+            if loc_url and (u.startswith(loc_url) or loc_url.startswith(u)):
+                return d.get("name")
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+# --- staging external Volume (tolerant) ----------------------------------------
+# Creating it needs CREATE EXTERNAL VOLUME on the backing external location. A
+# less-privileged runner may lack that; we DON'T fail setup (the control tables are
+# already created), we print the exact grant an external-location owner / metastore
+# admin can apply, then this cell can be re-run.
+for sql in VOLUME_STMTS:
+    preview = " ".join(sql.split())[:90]
+    try:
+        spark.sql(sql)  # noqa: F821
+        print("volume ok:", preview)
+    except Exception as e:  # noqa: BLE001
+        el = _external_location_name_for(LOCAL.external_location_url)
+        el_ref = f"`{el}`" if el else "<external-location-name>"
+        print(f"volume SKIPPED ({type(e).__name__}): {preview}")
+        print(f"   -> {str(e)[:200]}")
+        print("   Remediation — run as the external-location OWNER or a metastore admin, then re-run this cell:")
+        print(f"     GRANT CREATE EXTERNAL VOLUME ON EXTERNAL LOCATION {el_ref} TO `{SPN}`;")
+        print(f"     -- (and to the interactive runner if seeding/replicating manually)")
+        print(f"   external location backs: {LOCAL.external_location_url}")
+        print("   Alternative: leave storage.staging_volume unset in dr_config.yaml to use /dbfs.")
 
 print("Setup complete for the local metastore.")
 

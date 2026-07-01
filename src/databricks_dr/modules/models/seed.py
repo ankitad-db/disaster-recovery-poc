@@ -127,8 +127,18 @@ def _seed_one_model(cfg: Config, *, name: str, dataset: str = "iris", n_versions
             )
             last_version = info.registered_model_version
             _logger.info("Registered %s version %s", name, last_version)
+        # Version-level metadata so DR fidelity is exercised on every object type
+        # (per-version description + tags), uniformly for each seeded model.
+        client.update_model_version(
+            name, last_version,
+            description=f"{dataset} RandomForest v{i} (n_estimators={40 + i * 10}, max_depth={4 + i})",
+        )
+        client.set_model_version_tag(name, last_version, "seed_iteration", str(i))
+        client.set_model_version_tag(name, last_version, "validation_status", "passed")
 
-    # Aliases + tags (the consumer-facing handles we will replicate)
+    # Registered-model description + aliases + tags (consumer-facing handles we replicate)
+    client.update_registered_model(
+        name, description=f"DR POC {dataset} classifier — {n_versions} versions, seeded for replication testing")
     client.set_registered_model_alias(name, "Champion", last_version)
     if int(last_version) > 1:
         client.set_registered_model_alias(name, "Challenger", str(int(last_version) - 1))
