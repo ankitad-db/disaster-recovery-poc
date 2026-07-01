@@ -82,6 +82,10 @@ def import_model(
     _ensure_registered_model(client, model)
 
     dest_experiment_id = _ensure_experiment(client, experiment_name)
+    # On a clean restore, clear the DR experiment's prior backing runs so repeated
+    # baseline/CDC cycles don't leak orphan runs (the experiment is DR-exclusive).
+    if delete_model:
+        _purge_experiment_runs(client, dest_experiment_id)
 
     # Recreate each backing run once; map source run_id -> new dest run_id.
     def _do_run(run: RunRec):
@@ -242,6 +246,36 @@ def _ensure_experiment(client, name: str) -> str:
         return exp.experiment_id
     _ensure_workspace_dir(os.path.dirname(name))
     return client.create_experiment(name)
+
+
+def _purge_experiment_runs(client, experiment_id: str) -> None:
+    """Soft-delete all runs in a DR-managed experiment for a clean restore.
+
+    ``import_model(delete_model=True)`` drops the registered model but MLflow keeps
+    the experiment and its runs. Since ``/Shared/dr/experiments/<model>`` is
+    DR-exclusive, we clear its prior runs here so repeated baseline/CDC overwrites
+    don't accumulate orphaned (model-less) backing runs cycle after cycle.
+    """
+    from mlflow.entities import ViewType
+
+    deleted, token = 0, None
+    while True:
+        page = client.search_runs(
+            [experiment_id], run_view_type=ViewType.ACTIVE_ONLY,
+            max_results=1000, page_token=token,
+        )
+        for r in page:
+            try:
+                client.delete_run(r.info.run_id)
+                deleted += 1
+            except Exception as e:  # noqa: BLE001 - best effort; import proceeds
+                _logger.debug("delete_run %s failed: %s", r.info.run_id, e)
+        token = getattr(page, "token", None)
+        if not token:
+            break
+    if deleted:
+        _logger.info("purged %d prior run(s) from experiment %s (clean restore)",
+                     deleted, experiment_id)
 
 
 def _existing_versions(client, model: str) -> set:
