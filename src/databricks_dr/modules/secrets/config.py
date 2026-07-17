@@ -78,6 +78,11 @@ class SecretsConfig:
     def service_principal(self) -> str:
         return self.raw.get("service_principal", "")
 
+    @property
+    def seed(self) -> List[Dict[str, Any]]:
+        """POC-only sample scopes to create in the primary (see modules/secrets/seed.py)."""
+        return list((self.raw.get("seed") or {}).get("scopes", []))
+
     # ---- convenience -----------------------------------------------------------
     @property
     def include(self) -> List[str]:
