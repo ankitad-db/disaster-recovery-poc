@@ -17,6 +17,12 @@ nb_path = ctx.notebookPath().get()
 REPO_ROOT = "/Workspace" + "/".join(nb_path.split("/")[:-3])  # strip /notebooks/secrets/<name>
 CONFIG_PATH = f"{REPO_ROOT}/config/secrets_dr_config.yaml"
 sys.path.insert(0, f"{REPO_ROOT}/src")
+
+# Drop any previously-imported copy so a fresh `git pull` is picked up without a
+# cluster restart (Databricks caches imported modules across notebook re-runs).
+for _m in [m for m in sys.modules if m.startswith("databricks_dr")]:
+    del sys.modules[_m]
+
 print("CONFIG_PATH:", CONFIG_PATH)
 
 # COMMAND ----------
