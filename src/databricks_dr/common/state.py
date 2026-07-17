@@ -16,48 +16,22 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .logging import get_logger
+from .sql import SqlExecutor, lit as _sql_literal, scalar as _scalar
 
 _logger = get_logger(__name__)
 _SINGLETON = "global"
 
 
-def _sql_literal(v) -> str:
-    if v is None:
-        return "NULL"
-    return "'" + str(v).replace("'", "''") + "'"
-
-
 def _execute(sql: str, spark=None, wc=None, warehouse_id: str | None = None):
-    if spark is not None:
-        return spark.sql(sql)
-    if wc is not None and warehouse_id:
-        return wc.statement_execution.execute_statement(
-            warehouse_id=warehouse_id, statement=sql, wait_timeout="30s"
-        )
-    _logger.warning("No spark/warehouse to execute dr_state SQL:\n%s", sql)
-    return None
-
-
-def _scalar(res) -> Optional[str]:
-    if res is None:
-        return None
-    if hasattr(res, "collect"):  # Spark DataFrame
-        rows = res.collect()
-        return rows[0][0] if rows and rows[0][0] is not None else None
-    try:  # Databricks SDK StatementResponse
-        data = res.result.data_array
-        if data and data[0] and data[0][0] is not None:
-            return str(data[0][0])
-    except (AttributeError, IndexError, TypeError):
-        pass
-    return None
+    return SqlExecutor(spark=spark, workspace_client=wc, warehouse_id=warehouse_id).execute(sql)
 
 
 def read_active_primary(table: str, *, spark=None, wc=None, warehouse_id: str | None = None) -> Optional[str]:
     """Active-primary region key from the control table, or None if unavailable."""
     sql = f"SELECT active_primary FROM {table} WHERE singleton_id = {_sql_literal(_SINGLETON)}"
     try:
-        return _scalar(_execute(sql, spark, wc, warehouse_id))
+        val = _scalar(_execute(sql, spark, wc, warehouse_id))
+        return str(val) if val is not None else None
     except Exception as e:  # noqa: BLE001 - table may not exist yet; caller falls back to config role
         _logger.debug("dr_state read failed (%s); falling back to config role", e)
         return None

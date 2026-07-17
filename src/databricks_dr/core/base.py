@@ -27,6 +27,7 @@ class RunContext:
     dry_run: bool = False
     spark: Optional[object] = None  # set inside Databricks notebooks/jobs
     dbutils: Optional[object] = None  # for reading cross-workspace secret scopes
+    force: bool = False  # override failover/failback readiness gates (true disaster)
 
 
 class BaseDRModule(ABC):

@@ -91,7 +91,7 @@ def tracking_uri_for(region: RegionConfig) -> str:
 
 @lru_cache(maxsize=8)
 def workspace_client(profile: str):
-    """Databricks SDK WorkspaceClient for a profile (grants, serving endpoints, jobs)."""
+    """Databricks SDK WorkspaceClient for a profile (grants, jobs, UC calls)."""
     from databricks.sdk import WorkspaceClient
 
     _logger.debug("Creating WorkspaceClient profile=%s", profile)
@@ -101,7 +101,7 @@ def workspace_client(profile: str):
 def workspace_client_from_creds(host: str | None = None, token: str | None = None):
     """WorkspaceClient from explicit creds, or the ambient runtime identity.
 
-    Used for cross-workspace SDK calls (grants, serving endpoints) from a job that
+    Used for cross-workspace SDK calls (e.g. UC grants) from a job that
     runs in the LOCAL workspace: pass the remote secret-scope host+token for the
     *source* workspace, or call with no args for the *local* (dest) ambient
     identity. Mirrors the env-based identity switch used in ``replicate``.

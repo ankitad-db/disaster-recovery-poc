@@ -19,9 +19,10 @@ from __future__ import annotations
 import time
 
 from ...common import engine, storage
-from ...common.audit import AuditRow, IdMappingLog, rows_from_import_result
+from ...common.audit import AuditRow
 from ...common.clients import local_or_profile_uri
 from ...core.base import RunContext
+from . import _idmap
 from ._selection import resolve_models
 
 
@@ -96,39 +97,11 @@ def run_import(ctx: RunContext, rel: str | None = None, *, delete_model: bool = 
                 import_permissions=cfg.models.get("export_permissions", True),
                 import_source_tags=True,
             )
-            _persist_id_mappings(ctx, results or [], row.audit_id)
+            _idmap.persist(ctx, results or [], row.audit_id)
         audit.update_status(row.audit_id, "SUCCESS", duration_sec=round(time.time() - t0, 2))
     except Exception as e:  # noqa: BLE001
         audit.update_status(row.audit_id, "FAILED", error_message=str(e))
         raise
-
-
-def _persist_id_mappings(ctx: RunContext, results: list, audit_id: str) -> None:
-    """Persist source<->dest experiment/run/version IDs for each imported model.
-
-    Non-fatal: the audit table stays the source of truth if this write fails.
-    """
-    if not results:
-        return
-    audit = ctx.audit
-    try:
-        mlog = IdMappingLog(
-            ctx.cfg.mapping_table, spark=getattr(audit, "spark", None),
-            workspace_client=getattr(audit, "wc", None),
-            warehouse_id=getattr(audit, "warehouse_id", None),
-        )
-        rows = []
-        for result in results:
-            rows.extend(rows_from_import_result(
-                result, direction_label=ctx.direction.label,
-                source_workspace=ctx.direction.source.workspace,
-                target_workspace=ctx.direction.dest.workspace, audit_id=audit_id,
-            ))
-        mlog.insert_many(rows)
-    except Exception as e:  # noqa: BLE001 - mapping is auxiliary, never fatal
-        import logging
-
-        logging.getLogger(__name__).warning("id-mapping persist skipped: %s", e)
 
 
 def run_baseline(ctx: RunContext) -> None:

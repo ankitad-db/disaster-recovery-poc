@@ -2,9 +2,9 @@
 # MAGIC %md
 # MAGIC # Drill · FAILOVER  (run in WEST / us-west-2)
 # MAGIC Self-asserting failover half of the DR drill. One run does the whole WEST side:
-# MAGIC baseline check → `failover` (scale up endpoints, persist `dr_state=west`, audit)
-# MAGIC → log a simulated "outage" model version in WEST. Then asserts the expected
-# MAGIC state and **raises on failure** so the job task goes red.
+# MAGIC baseline check → `failover` (readiness preflight → persist + verify `dr_state=west`
+# MAGIC → record RPO) → log a simulated "outage" model version in WEST. Then asserts the
+# MAGIC expected state and **raises on failure** so the job task goes red.
 # MAGIC
 # MAGIC After this, run `drill_failback` in **EAST** to recover and restore steady state.
 

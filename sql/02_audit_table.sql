@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS dr_poc.dr_control.dr_replication_audit (
   audit_id          STRING    NOT NULL COMMENT 'UUID for this audit row',
   event_time        TIMESTAMP NOT NULL COMMENT 'UTC time this DR op was recorded',
-  operation         STRING    NOT NULL COMMENT 'EXPORT|IMPORT|VERIFY|GRANTS|ENDPOINT|DEPENDENCY|FAILOVER|FAILBACK|HEALTH',
+  operation         STRING    NOT NULL COMMENT 'EXPORT|IMPORT|VERIFY|GRANTS|DEPENDENCY|FAILOVER|FAILBACK|HEALTH',
   direction         STRING             COMMENT 'e.g. us-west-2->us-east-1',
   triggered_by      STRING             COMMENT 'SCHEDULE|AUDIT_EVENT|MANUAL (legacy)',
   model_name        STRING             COMMENT 'Fully-qualified model name or CSV/*',
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS dr_poc.dr_control.dr_replication_audit (
   error_message     STRING             COMMENT 'Failure detail / operator note',
   tool_version      STRING             COMMENT 'Replication engine version (native-<mlflow>)',
   actor             STRING             COMMENT 'Principal that ran the op (SPN)',
-  object_type       STRING             COMMENT 'model|version|run|experiment|prompt|trace|eval_dataset|logged_model|alias|grant|endpoint|notebook',
+  object_type       STRING             COMMENT 'model|version|run|experiment|prompt|trace|eval_dataset|logged_model|alias|grant|notebook',
   action            STRING             COMMENT 'CREATE|UPDATE|DELETE|ALIAS_SET|NONE',
   trigger_type      STRING             COMMENT 'MANUAL|SCHEDULE|AUDIT_SCAN|MODEL_TRIGGER',
   source_event_id   STRING             COMMENT 'system.access.audit event_id correlation',
@@ -53,7 +53,7 @@ ALTER TABLE dr_poc.dr_control.dr_replication_audit ADD COLUMNS (
 -- reconciliation and health/drift checks.
 CREATE TABLE IF NOT EXISTS dr_poc.dr_control.dr_object_inventory (
   object_key          STRING    NOT NULL COMMENT 'Fully-qualified object id (e.g. model name)',
-  object_type         STRING    NOT NULL COMMENT 'model|endpoint|... (DR module object type)',
+  object_type         STRING    NOT NULL COMMENT 'model (DR module object type)',
   source_region       STRING             COMMENT 'Region the object was authored in',
   last_source_version STRING             COMMENT 'Last source version observed/synced',
   alias_map           STRING             COMMENT 'JSON {alias: version} last synced',

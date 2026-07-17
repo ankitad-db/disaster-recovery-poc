@@ -7,8 +7,8 @@
 # MAGIC
 # MAGIC | action | run in | what it does |
 # MAGIC |---|---|---|
-# MAGIC | `failover` | **SECONDARY (west)** | Promote west to serve. No pull (primary may be down) — west is already a warm mirror. Records a `FAILOVER` audit row and **persists `dr_state` active_primary=west**, so scheduled jobs follow automatically. Just repoint consumers. |
-# MAGIC | `failback` | **HOME PRIMARY (east)** | Reverse CDC `west -> east` to pull outage-time changes back, a `FAILBACK` marker, and **resets `dr_state` active_primary=east** — steady state restored, no manual env-var cleanup. |
+# MAGIC | `failover` | **SECONDARY (west)** | Readiness preflight (is west a usable mirror?) → **persist + verify `dr_state` active_primary=west** → record the recovery point (RPO). No pull (primary may be down) — west is already a warm mirror. Blocks only if a model is missing/none in scope; set **force=true** to promote anyway. Then repoint consumers. |
+# MAGIC | `failback` | **HOME PRIMARY (east)** | Reverse CDC `west -> east` pulls outage-time changes back → verify east caught up → **reset `dr_state` active_primary=east**. Blocks if the catch-up is incomplete; set **force=true** to override. |
 # MAGIC
 # MAGIC > Role state lives in the `dr_state` control table (the source of truth), not an
 # MAGIC > env var. `DR_ACTIVE_PRIMARY` remains only as a dev/drill override.
@@ -22,7 +22,9 @@
 
 # COMMAND ----------
 dbutils.widgets.dropdown("action", "failover", ["failover", "failback"])  # noqa: F821
+dbutils.widgets.dropdown("force", "false", ["false", "true"])             # noqa: F821
 action = dbutils.widgets.get("action")                                    # noqa: F821
+force = dbutils.widgets.get("force") == "true"                            # noqa: F821
 
 # COMMAND ----------
 from databricks_dr.common.audit import AuditLog
@@ -37,7 +39,7 @@ if action == "failover":
     # east primary) so dest=west (this workspace); failover() then persists west.
     ctx = RunContext(cfg=cfg, direction=cfg.direction(spark=spark), triggered_by="MANUAL",  # noqa: F821
                      audit=AuditLog(cfg.audit_table, spark=spark),  # noqa: F821
-                     spark=spark, dbutils=dbutils)  # noqa: F821
+                     spark=spark, dbutils=dbutils, force=force)  # noqa: F821
     ModelsDRModule(ctx).failover()
 else:
     # Failback resolves west->east from CONFIG roles (role-state-independent), so the
@@ -45,8 +47,8 @@ else:
     # required to read the dr_remote_west scope; failback() resets dr_state to east.
     ctx = RunContext(cfg=cfg, direction=cfg.direction(failback=True, spark=spark), triggered_by="MANUAL",  # noqa: F821
                      audit=AuditLog(cfg.audit_table, spark=spark),  # noqa: F821
-                     spark=spark, dbutils=dbutils)  # noqa: F821
-    ModelsDRModule(ctx).cdc()       # reverse CDC catch-up (east -> west)
-    ModelsDRModule(ctx).failback()  # FAILBACK marker + dr_state reset + endpoint scale-up
+                     spark=spark, dbutils=dbutils, force=force)  # noqa: F821
+    ModelsDRModule(ctx).cdc()       # reverse CDC catch-up (west -> east)
+    ModelsDRModule(ctx).failback()  # verify catch-up + FAILBACK marker + dr_state reset
 
 print(action, "complete:", ctx.direction.label)

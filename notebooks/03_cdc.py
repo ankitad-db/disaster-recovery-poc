@@ -3,11 +3,14 @@
 # MAGIC # 03 · Incremental CDC  (run in the SECONDARY region — currently west)
 # MAGIC Steady-state DR. Pulls from the PRIMARY (east) via the same **secret scope** as
 # MAGIC notebook 02, but only re-replicates models whose source version is newer
-# MAGIC than the per-model audit watermark. Unchanged models are skipped, so this is
-# MAGIC cheap to schedule (e.g. every 15 min). Re-sync overwrites cleanly — no
-# MAGIC duplicate versions. Change detection uses the registry diff by default
-# MAGIC (`changefeed.py`); set `models.cdc_use_system_tables: true` to also scan
-# MAGIC `system.access.audit`. Schedule via `dr_models_cdc` in resources/.
+# MAGIC than the per-model audit watermark (or whose metadata signature drifted).
+# MAGIC Unchanged models are skipped, so this is cheap to schedule (e.g. every 15 min).
+# MAGIC Each changed model syncs as an **append-only delta**: only new versions +
+# MAGIC metadata move, existing destination versions are never dropped. Per-model
+# MAGIC failures are isolated (retried with backoff, recorded, and the run continues),
+# MAGIC then the task fails loudly if any model failed. Change detection uses the
+# MAGIC registry diff by default (`changefeed.py`); set `models.cdc_use_system_tables:
+# MAGIC true` to also scan `system.access.audit`. Schedule via `dr_models_cdc` in resources/.
 
 # COMMAND ----------
 # MAGIC %run ./_bootstrap

@@ -10,13 +10,26 @@ override) and the same code runs in the opposite direction.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
 from typing import Any, Dict
 
 import yaml
 
+from .logging import get_logger
+
+_logger = get_logger(__name__)
+
 DEFAULT_CONFIG_PATH = "config/dr_config.yaml"
+
+
+class ConfigError(ValueError):
+    """Raised when ``dr_config.yaml`` is missing required structure or is inconsistent.
+
+    Carries an actionable message (which key/section, and what was expected) so a
+    misconfiguration fails fast at load time with a clear pointer rather than deep
+    inside a replication run.
+    """
 
 
 @dataclass(frozen=True)
@@ -55,8 +68,10 @@ class Config:
     def __init__(self, raw: Dict[str, Any], path: str | None = None):
         self._raw = raw
         self.path = path
+        if not isinstance(raw, dict) or "regions" not in raw:
+            raise ConfigError("config must be a mapping with a top-level 'regions:' section")
         self.regions: Dict[str, RegionConfig] = {
-            key: RegionConfig(key=key, **vals) for key, vals in raw["regions"].items()
+            key: _build_region(key, vals) for key, vals in raw["regions"].items()
         }
 
     # ---- raw section accessors -------------------------------------------------
@@ -116,6 +131,19 @@ class Config:
         """
         return self.uc.get("mapping_table") or (
             f"{self.uc['catalog']}.{self.uc['control_schema']}.dr_id_mapping"
+        )
+
+    @property
+    def inventory_table(self) -> str:
+        """Control table holding the per-object desired-state snapshot.
+
+        One row per replicated object (model): last synced version, alias map, and a
+        metadata signature (``integrity_hash``). CDC diffs the live source signature
+        against the stored one to detect metadata-only drift (aliases/tags/description)
+        that doesn't bump a version -- independent of ``system.access.audit``.
+        """
+        return self.uc.get("inventory_table") or (
+            f"{self.uc['catalog']}.{self.uc['control_schema']}.dr_object_inventory"
         )
 
     # ---- role / direction ------------------------------------------------------
@@ -208,13 +236,88 @@ class Config:
         secondary = self.regions[self.secondary_key(spark)]
         return Direction(source=primary, dest=secondary, folder=storage["primary_folder"])
 
+    # ---- validation ------------------------------------------------------------
+    def validate(self) -> "Config":
+        """Fail fast on structural/semantic errors; log warnings on soft issues.
+
+        Hard errors (raise :class:`ConfigError`): wrong region count, no/many primary
+        roles, missing required ``uc`` / ``storage`` keys. Soft issues (log a WARNING,
+        don't raise): no staging volume, or missing pull secrets for a region -- these
+        only bite specific flows, so we don't block ``config show`` or the split
+        baseline path.
+        """
+        errors: list[str] = []
+
+        # regions: exactly two, exactly one primary.
+        if len(self.regions) != 2:
+            errors.append(f"expected exactly 2 regions, got {len(self.regions)}: {list(self.regions)}")
+        primaries = [k for k, rc in self.regions.items() if rc.role == "primary"]
+        secondaries = [k for k, rc in self.regions.items() if rc.role == "secondary"]
+        if len(primaries) != 1:
+            errors.append(f"exactly one region must have role 'primary', found {primaries}")
+        if self.regions and len(secondaries) != len(self.regions) - len(primaries):
+            errors.append("every non-primary region must have role 'secondary'")
+
+        # required uc keys.
+        for key in ("catalog", "schema", "control_schema", "audit_table"):
+            if not self.uc.get(key):
+                errors.append(f"uc.{key} is required")
+
+        # required storage keys.
+        for key in ("base_path", "primary_folder", "secondary_folder", "latest_pointer"):
+            if not self.storage.get(key):
+                errors.append(f"storage.{key} is required")
+
+        if errors:
+            raise ConfigError(
+                "invalid DR config" + (f" ({self.path})" if self.path else "") + ":\n  - "
+                + "\n  - ".join(errors)
+            )
+
+        # soft warnings (won't block, but flag likely-misconfigured pull flows).
+        if not self.staging_volume:
+            _logger.warning(
+                "storage.staging_volume unset -- export bundles fall back to the DBFS root "
+                "(no FUSE on serverless/shared compute). Set a UC external Volume for production."
+            )
+        for key in self.regions:
+            if not self.secrets.get(key):
+                _logger.warning(
+                    "secrets.%s missing -- the pull flow (replicate/cdc with %s as source) "
+                    "cannot read the remote registry until its secret scope is configured.",
+                    key, key,
+                )
+        return self
+
+
+def _build_region(key: str, vals: Any) -> RegionConfig:
+    """Construct a :class:`RegionConfig`, turning field errors into actionable messages."""
+    if not isinstance(vals, dict):
+        raise ConfigError(f"regions.{key} must be a mapping, got {type(vals).__name__}")
+    allowed = {f.name for f in fields(RegionConfig)} - {"key"}
+    required = {
+        f.name for f in fields(RegionConfig)
+        if f.default is MISSING and f.default_factory is MISSING  # no default -> required
+    } - {"key"}
+    unknown = set(vals) - allowed
+    if unknown:
+        raise ConfigError(f"regions.{key}: unknown field(s) {sorted(unknown)}; allowed: {sorted(allowed)}")
+    missing = required - set(vals)
+    if missing:
+        raise ConfigError(f"regions.{key}: missing required field(s) {sorted(missing)}")
+    return RegionConfig(key=key, **vals)
+
 
 def load_config(path: str | None = None) -> Config:
-    """Load config from an explicit path, the ``DR_CONFIG`` env var, or the default."""
+    """Load config from an explicit path, the ``DR_CONFIG`` env var, or the default.
+
+    Validates structure/semantics before returning, so a malformed config fails at
+    load time with an actionable message instead of deep inside a run.
+    """
     resolved = path or os.environ.get("DR_CONFIG") or DEFAULT_CONFIG_PATH
     p = Path(resolved)
     if not p.exists():
         raise FileNotFoundError(f"DR config not found: {p.resolve()}")
     with p.open() as f:
         raw = yaml.safe_load(f)
-    return Config(raw, path=str(p))
+    return Config(raw, path=str(p)).validate()

@@ -61,8 +61,18 @@ def export_model(
     prompt_names: Optional[List[str]] = None,
     eval_dataset_names: Optional[List[str]] = None,
     replicate_traces: bool = False,
+    skip_versions: Optional[set] = None,
 ) -> Manifest:
-    """Export one registered model (all versions + lineage + GenAI) into ``output_dir``."""
+    """Export one registered model into ``output_dir``.
+
+    ``skip_versions`` (delta/CDC path) is the set of source version numbers the
+    destination already holds; those versions -- and their backing runs -- are
+    omitted from the bundle so an incremental sync moves only the *new* artifacts.
+    Registered-model metadata (description, tags, aliases) is ALWAYS captured in
+    full, so a metadata-only change (e.g. an alias moved with no new version) still
+    produces a bundle the importer can reconcile. When ``None`` (baseline) every
+    version is exported.
+    """
     client = make_mlflow_client(registry_uri)
     os.makedirs(output_dir, exist_ok=True)
     is_uc = _is_uc(model)
@@ -80,6 +90,14 @@ def export_model(
     )
 
     versions = _scale.search_all_model_versions(client, model)
+    if skip_versions:
+        kept = [mv for mv in versions if int(mv.version) not in skip_versions]
+        if len(kept) != len(versions):
+            _logger.info(
+                "delta export %s: %d/%d version(s) already on dest, exporting %d new",
+                model, len(versions) - len(kept), len(versions), len(kept),
+            )
+        versions = kept
 
     runs_seen: Dict[str, RunRec] = {}
     experiments_seen: Dict[str, ExperimentRec] = {}

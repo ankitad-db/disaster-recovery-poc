@@ -193,7 +193,6 @@ Simulate east down; promote west. Run `notebooks/04_failover_failback.py` with
 SELECT active_primary, reason FROM dr_poc.dr_control.dr_state;  -- active_primary = west, reason = FAILOVER
 SELECT * FROM dr_poc.dr_control.dr_replication_audit WHERE operation='FAILOVER' ORDER BY event_time DESC LIMIT 1;
 ```
-If serving endpoints are in scope, confirm the west standby endpoint scaled up.
 
 ---
 

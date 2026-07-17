@@ -1,0 +1,24 @@
+---
+title: DR Lifecycle - Active/Passive State Machine
+---
+stateDiagram-v2
+    direction LR
+    [*] --> Bootstrap
+    Bootstrap --> Steady: 00_setup in BOTH / dr_state=east
+    Steady --> Steady: CDC EAST to WEST (delta, ~15m)
+    Steady --> Failover: EAST down OR drill
+    Failover --> PromotedWest: flip dr_state=west (verified)
+    PromotedWest --> PromotedWest: users author models on WEST
+    PromotedWest --> ReverseCDC: EAST recovers
+    ReverseCDC --> ReverseCDC: CDC WEST to EAST (catch up)
+    ReverseCDC --> Failback: WEST quiesced AND EAST caught up
+    Failback --> Steady: reset dr_state=east (verified)
+
+    note right of Steady
+        EAST = active primary
+        WEST = warm passive mirror
+    end note
+    note right of PromotedWest
+        WEST = active primary
+        EAST = down / recovering
+    end note

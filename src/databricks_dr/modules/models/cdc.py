@@ -4,9 +4,11 @@ Steady-state DR. Runs in the LOCAL (destination) workspace, just like
 ``replicate``. Change detection is delegated to
 :mod:`databricks_dr.common.native.changefeed`, which combines a
 ``system.access.audit`` event scan (the same signal Managed DR reacts to) with an
-authoritative registry diff. Only the models that changed are re-replicated, using
-the proven full-model pull with ``delete_model=True`` (clean overwrite, no
-duplicate versions).
+authoritative registry diff. Only the models that changed are re-replicated, and
+each is synced as a *delta*: the destination's existing versions are skipped on
+export and preserved on import (``delete_model=False``), so a steady-state pass
+moves only the new versions plus any metadata (aliases/tags/description) that
+drifted -- never a drop-and-rebuild of the whole model.
 
 POC trigger = a manual notebook/job run. A scheduled job and a Model Update Trigger
 are defined (paused) in ``resources/dr_models_jobs.yml`` for later enablement; when
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 from ...common.audit import AuditRow
 from ...common.clients import make_mlflow_client
+from ...common.inventory import ObjectInventory
 from ...common.logging import get_logger
 from ...common.native import changefeed
 from ...core.base import RunContext
@@ -45,6 +48,17 @@ def run_cdc(ctx: RunContext) -> None:
     use_sys_tables = bool(cfg.models.get("cdc_use_system_tables", False))
     scan_spark = ctx.spark if use_sys_tables else None
 
+    # Metadata-drift detector: diff the live source signature against the one stored on
+    # the last successful sync so alias/tag/description changes that don't bump a
+    # version are still re-synced. Reads the LOCAL desired-state inventory (spark on the
+    # dest cluster; unaffected by the ambient source identity used for source reads).
+    detect_metadata_drift = bool(cfg.models.get("detect_metadata_drift", True))
+    inventory = ObjectInventory(
+        cfg.inventory_table, spark=getattr(audit, "spark", None),
+        workspace_client=getattr(audit, "wc", None),
+        warehouse_id=getattr(audit, "warehouse_id", None),
+    )
+
     # --- detect changed models under the REMOTE (source) identity ---
     with replicate._ambient_identity(host, token):
         client = make_mlflow_client(replicate.LOCAL_REGISTRY)
@@ -52,6 +66,8 @@ def run_cdc(ctx: RunContext) -> None:
         result = changefeed.detect_changes(
             client=client, models=models, watermark_fn=audit.watermark,
             spark=scan_spark, catalog=catalog, schema=schema, since_iso=since,
+            signature_fn=inventory.last_signature,
+            detect_metadata_drift=detect_metadata_drift,
         )
 
     if not result.changed:
@@ -61,8 +77,11 @@ def run_cdc(ctx: RunContext) -> None:
     _logger.info("CDC: %d changed model(s) via %s -> %s",
                  len(result.changed), result.detector, ", ".join(result.changed))
 
-    # --- replicate only the changed models (full overwrite, no duplicates) ---
-    replicate.run_replicate(ctx, full=False, delete_model=True, models_override=list(result.changed))
+    # --- replicate only the changed models as an incremental delta ---
+    # full=False => export skips versions the dest already holds; delete_model=False
+    # => import appends new versions and reconciles metadata without dropping the
+    # existing model (no destructive overwrite, no re-moved artifacts).
+    replicate.run_replicate(ctx, full=False, delete_model=False, models_override=list(result.changed))
 
     # --- advance the watermark per model, correlating the triggering audit event ---
     for model, source_max in result.changed.items():

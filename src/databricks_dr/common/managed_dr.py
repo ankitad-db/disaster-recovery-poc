@@ -4,7 +4,9 @@ Databricks **Managed DR** owns cross-region replication + failover for the asset
 supports (UC metadata & grants, managed-table data, and a growing set of workspace
 assets) and provides a stable workspace URL that survives a regional failover. It
 does NOT cover ML models, serving endpoints, vector search, secrets, Delta shares or
-volume *data* -- which is exactly the gap this DIY framework fills.
+volume *data*. This DIY framework fills the **ML model** part of that gap (registered
+models, versions, aliases, runs/experiments, GenAI); serving endpoints and the other
+asset types are out of scope.
 
 This DIY framework is deliberately **standalone**: failover/failback are driven by
 our own ``dr_state`` control table (see ``modules/models/failover.py``), with no hard
@@ -20,7 +22,7 @@ API) only when that integration is needed.
 Intended sequence in a Managed-DR shop:
     1. Managed DR fails the workspace over to the secondary region (stable URL).
     2. ``on_failover(context)`` is invoked so the DIY layer can align its ``dr_state``
-       and stop/redirect replication, then promote the standby models/endpoints.
+       and stop/redirect replication, then promote the standby models.
     3. Steady-state CDC resumes in the (new) direction.
 """
 

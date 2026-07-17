@@ -7,26 +7,29 @@ regions:
     region: us-west-2
     profile: dr-west         # databricks CLI profile / MLflow registry suffix
     registry_uri: databricks-uc://dr-west
-    host: https://fe-sandbox-ankita-dr-wp-us-west-2.cloud.databricks.com
-    metastore: ad-dr-metastore-us-west-2
-    workspace: fe-sandbox-ankita-dr-wp-us-west-2
+    host: https://fevm-krish-dr-fevm-us-west-2.cloud.databricks.com
+    metastore: aws:us-west-2:616f89c2-6a5b-4106-9253-2e6f81df10e4
+    workspace: fevm-krish-dr-fevm-us-west-2
     # Only used by the optional bridge: sync|crr path; the default pull stages on the
-    # staging volume. Points at this region's real external S3 bucket.
-    dbfs_bucket: ankita-dr-wp-us-west-2-ext-s3-332745928618-sbxw70
+    # staging volume. The 'dr-access-to-us-east' external location (account users have
+    # ALL PRIVILEGES) backs both the catalog managed storage (/dr_managed) and the
+    # staging volume (/dr_staging) under distinct prefixes -- only one EL is available here.
+    dbfs_bucket: vdm-classic-pxl08i-ext-s3-049629455384-bz222e
     # S3 bucket behind this workspace's UC external location (backs the staging volume).
-    external_location_url: s3://ankita-dr-wp-us-west-2-ext-s3-332745928618-sbxw70/
+    external_location_url: s3://vdm-classic-pxl08i-ext-s3-049629455384-bz222e/
   east:
     role: primary
-    region: us-east-1
+    region: us-east-2
     profile: dr-east
     registry_uri: databricks-uc://dr-east
-    host: https://fe-sandbox-krish-us-eat-1-sandbox.cloud.databricks.com
-    metastore: ad-dr-metastore-us-east-1
-    workspace: fe-sandbox-krish-us-eat-1-sandbox
+    host: https://fevm-fevm-ps-dr-us-east-2.cloud.databricks.com
+    metastore: aws:us-east-2:483f96cd-b7ac-49a4-94d3-9217a3140461
+    workspace: fevm-fevm-ps-dr-us-east-2
     # Only used by the optional bridge: sync|crr path; the default pull stages on the
-    # staging volume. Points at this region's real external S3 bucket.
-    dbfs_bucket: krish-us-eat-1-sandbox-ext-s3-332745928618-k6hevn
-    external_location_url: s3://krish-us-eat-1-sandbox-ext-s3-332745928618-k6hevn/
+    # staging volume. Points at this region's real external S3 bucket (the FEVM external
+    # location we have ALL PRIVILEGES on — dr_poc's own managed bucket is separate).
+    dbfs_bucket: fevm-ps-dr-us-east-2-ext-s3-049629455384-vmmrp0
+    external_location_url: s3://fevm-ps-dr-us-east-2-ext-s3-049629455384-vmmrp0/
 
 # Identity used for replication (account admin SPN, present in both workspaces).
 # Reference by application-id (UC grants/run_as resolve SPNs by app-id, not display name).
@@ -98,13 +101,19 @@ models:
   dest_experiment_base: /Shared/dr/experiments
   # Consumer-facing extras
   replicate_grants: true
-  replicate_serving_endpoints: true
-  consumer_group: dr_consumers
 
   # --- native engine tuning (all optional; safe defaults shown) ---
   # Bounded parallelism for per-version (single model) and per-model (bulk) work.
   # 1 = fully sequential/deterministic (POC default); raise for throughput at scale.
   max_workers: 1
+  # Per-model resilience. Each model's export/import is isolated: a failure is
+  # retried with exponential backoff on *transient* errors (throttling / 5xx /
+  # network), recorded to the audit table (retry_count), and the run continues with
+  # the remaining models -- then fails loudly at the end if any model failed, so a
+  # single bad model never aborts a whole batch. retry_attempts counts the total
+  # tries (1 = no retry); retry_base_delay is the first backoff in seconds (doubles).
+  retry_attempts: 3
+  retry_base_delay: 2.0
   # Notebook revisions to export with each backing run (CSV or list): SOURCE|HTML|JUPYTER|DBC.
   notebook_formats: SOURCE
   # Optional workspace dir to re-upload SOURCE notebooks into on import (null = skip).
@@ -117,3 +126,10 @@ models:
   # for the cross-account pull). Set true only where the job's system.access.audit
   # stream carries the SOURCE's model events (source-side / shared-account runs).
   cdc_use_system_tables: false
+  # Metadata-drift detection. Beyond the version watermark, compute a signature over
+  # each source model's aliases/tags/descriptions and compare it to the last synced
+  # signature in dr_object_inventory, so metadata-only changes (new/moved alias, tag
+  # or description edits) that don't bump a version are still re-synced. Account-
+  # agnostic (no dependency on system.access.audit). Set false on very large
+  # registries where the extra per-version metadata reads outweigh the benefit.
+  detect_metadata_drift: true

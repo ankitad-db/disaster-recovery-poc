@@ -1,0 +1,32 @@
+---
+title: Staged Failover - Export Continuously, Import on Failover (Managed-DR secondary)
+---
+flowchart LR
+    subgraph EAST["EAST us-east-1 - ACTIVE / writable (primary)"]
+        direction TB
+        ER["UC Model Registry + MLflow<br/>models, versions, aliases, tags,<br/>runs, experiments, grants"]
+        EXP["Export job - scheduled, delta<br/>changefeed: version diff + metadata drift"]
+        ER --> EXP
+    end
+
+    subgraph OBJ["Object storage - plain S3 (NOT the Databricks control plane)"]
+        BKT["WEST-region S3 bucket<br/>dr/primary/exports/&lt;ts&gt; + _latest.txt<br/>bundles = versions + artifacts + runs + grants"]
+    end
+
+    subgraph WEST["WEST us-west-2 - PASSIVE / read-only (Managed DR standby)"]
+        direction TB
+        IMP["Import + promote<br/>runs ONLY at/after failover"]
+        WR["UC Model Registry + MLflow<br/>read-only standby in steady state"]
+        IMP --> WR
+    end
+
+    EXP -->|"continuous, incremental<br/>write S3 directly via IAM"| BKT
+    EXP -.->|"steady state: NO writes to WEST<br/>(would be blocked by read-only)"| WR
+    BKT ==>|"ON FAILOVER: Managed DR makes WEST writable"| IMP
+
+    classDef active fill:#e6f4ea,stroke:#137333,color:#0b3d1f;
+    classDef passive fill:#fce8e6,stroke:#a50e0e,color:#5c0a0a;
+    classDef store fill:#fff4d6,stroke:#b06000,color:#5c3a00;
+    class ER,EXP active;
+    class WR,IMP passive;
+    class BKT store;

@@ -16,13 +16,14 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .logging import get_logger
+from .sql import SqlExecutor, lit as _sql_literal, rows as _rows, scalar as _scalar
 
 _logger = get_logger(__name__)
 
 
 @dataclass
 class AuditRow:
-    operation: str  # EXPORT|IMPORT|VERIFY|GRANTS|ENDPOINT|DEPENDENCY|FAILOVER|FAILBACK|HEALTH
+    operation: str  # EXPORT|IMPORT|VERIFY|GRANTS|DEPENDENCY|FAILOVER|FAILBACK|HEALTH
     direction: str  # e.g. us-west-2->us-east-1
     model_name: str
     status: str = "IN_PROGRESS"  # IN_PROGRESS|SUCCESS|FAILED|SKIPPED
@@ -40,7 +41,7 @@ class AuditRow:
     tool_version: Optional[str] = None
     actor: Optional[str] = None
     # --- detailed replication tracking (schema 2) ---
-    object_type: str = "model"  # model|version|run|experiment|prompt|trace|eval_dataset|logged_model|alias|grant|endpoint|notebook
+    object_type: str = "model"  # model|version|run|experiment|prompt|trace|eval_dataset|logged_model|alias|grant|notebook
     action: Optional[str] = None  # CREATE|UPDATE|DELETE|ALIAS_SET|NONE
     trigger_type: Optional[str] = None  # MANUAL|SCHEDULE|AUDIT_SCAN|MODEL_TRIGGER
     source_event_id: Optional[str] = None  # system.access.audit event_id correlation
@@ -54,14 +55,6 @@ class AuditRow:
     checksum: Optional[str] = None  # integrity hash of moved artifacts (optional)
     audit_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     event_time: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-def _sql_literal(v) -> str:
-    if v is None:
-        return "NULL"
-    if isinstance(v, (int, float)):
-        return str(v)
-    return "'" + str(v).replace("'", "''") + "'"
 
 
 class AuditLog:
@@ -86,21 +79,18 @@ class AuditLog:
     #: columns stored as SQL TIMESTAMP (inserted via to_timestamp).
     TIMESTAMP_COLS = {"event_time", "source_event_time"}
 
+    #: mutable columns update_status may set (guards against typo'd/injected keys).
+    UPDATABLE_COLS = frozenset(COLUMNS) - {"audit_id"}
+
     def __init__(self, table: str, spark=None, workspace_client=None, warehouse_id: str | None = None):
         self.table = table
         self.spark = spark
         self.wc = workspace_client
         self.warehouse_id = warehouse_id
+        self._sql = SqlExecutor(spark=spark, workspace_client=workspace_client, warehouse_id=warehouse_id)
 
     def _execute(self, sql: str):
-        if self.spark is not None:
-            return self.spark.sql(sql)
-        if self.wc is not None and self.warehouse_id:
-            return self.wc.statement_execution.execute_statement(
-                warehouse_id=self.warehouse_id, statement=sql, wait_timeout="30s"
-            )
-        _logger.warning("AuditLog has no spark/warehouse; SQL not executed:\n%s", sql)
-        return None
+        return self._sql.execute(sql)
 
     def insert(self, row: AuditRow) -> str:
         d = asdict(row)
@@ -121,6 +111,8 @@ class AuditLog:
     def update_status(self, audit_id: str, status: str, **fields) -> None:
         sets = [f"status = {_sql_literal(status)}"]
         for k, v in fields.items():
+            if k not in self.UPDATABLE_COLS:
+                raise ValueError(f"update_status: unknown audit column {k!r}")
             sets.append(f"{k} = {_sql_literal(v)}")
         sql = f"UPDATE {self.table} SET {', '.join(sets)} WHERE audit_id = {_sql_literal(audit_id)}"
         self._execute(sql)
@@ -132,9 +124,22 @@ class AuditLog:
             f"WHERE model_name = {_sql_literal(model_name)} AND operation IN ('IMPORT','VERIFY') "
             f"AND status = 'SUCCESS'"
         )
-        res = self._execute(sql)
-        wm = _extract_scalar(res)
+        wm = _scalar(self._execute(sql))
         return int(wm) if wm is not None else 0
+
+    def last_success_time(self, model_name: str | None = None) -> Optional[str]:
+        """Max event_time of a successful IMPORT/VERIFY (the effective recovery point).
+
+        With ``model_name`` it's per-model; without, it's the newest successful sync
+        across all in-scope models. Used by failover/failback to record the RPO
+        (how stale the promoted mirror is) on the role-change audit row.
+        """
+        where = "operation IN ('IMPORT','VERIFY') AND status = 'SUCCESS'"
+        if model_name:
+            where += f" AND model_name = {_sql_literal(model_name)}"
+        sql = f"SELECT MAX(event_time) AS ts FROM {self.table} WHERE {where}"
+        ts = _scalar(self._execute(sql))
+        return str(ts) if ts is not None else None
 
     def recent_failures(self, hours: int = 24) -> list[dict]:
         """FAILED audit rows in the last ``hours`` (newest first).
@@ -149,7 +154,7 @@ class AuditLog:
             f"AND event_time >= current_timestamp() - INTERVAL {int(hours)} HOURS "
             f"ORDER BY event_time DESC"
         )
-        return _extract_rows(self._execute(sql), cols)
+        return _rows(self._execute(sql), cols)
 
 
 @dataclass
@@ -189,16 +194,10 @@ class IdMappingLog:
         self.spark = spark
         self.wc = workspace_client
         self.warehouse_id = warehouse_id
+        self._sql = SqlExecutor(spark=spark, workspace_client=workspace_client, warehouse_id=warehouse_id)
 
     def _execute(self, sql: str):
-        if self.spark is not None:
-            return self.spark.sql(sql)
-        if self.wc is not None and self.warehouse_id:
-            return self.wc.statement_execution.execute_statement(
-                warehouse_id=self.warehouse_id, statement=sql, wait_timeout="30s"
-            )
-        _logger.warning("IdMappingLog has no spark/warehouse; SQL not executed:\n%s", sql)
-        return None
+        return self._sql.execute(sql)
 
     def _row_values(self, row: "IdMappingRow") -> str:
         d = asdict(row)
@@ -254,36 +253,3 @@ def rows_from_import_result(
         rows.append(IdMappingRow(id_type="model_version", source_id=str(sv), target_id=str(dv),
                                  source_version=str(sv), **common))
     return rows
-
-
-def _extract_scalar(res) -> Optional[int]:
-    """Best-effort scalar extraction across spark DataFrame and SDK responses."""
-    if res is None:
-        return None
-    # Spark DataFrame
-    if hasattr(res, "collect"):
-        rows = res.collect()
-        if rows and rows[0][0] is not None:
-            return rows[0][0]
-        return None
-    # Databricks SDK StatementResponse
-    try:
-        data = res.result.data_array
-        if data and data[0] and data[0][0] is not None:
-            return int(data[0][0])
-    except (AttributeError, IndexError, TypeError):
-        pass
-    return None
-
-
-def _extract_rows(res, columns: list[str]) -> list[dict]:
-    """Best-effort row extraction across spark DataFrame and SDK responses."""
-    if res is None:
-        return []
-    if hasattr(res, "collect"):  # Spark DataFrame
-        return [r.asDict() for r in res.collect()]
-    try:  # Databricks SDK StatementResponse
-        data = res.result.data_array or []
-        return [dict(zip(columns, row)) for row in data]
-    except (AttributeError, TypeError):
-        return []

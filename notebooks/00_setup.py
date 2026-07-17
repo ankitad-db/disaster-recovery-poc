@@ -97,7 +97,7 @@ STATEMENTS = [
     f"""CREATE TABLE IF NOT EXISTS {AUDIT} (
       audit_id          STRING    NOT NULL COMMENT 'UUID for this audit row',
       event_time        TIMESTAMP NOT NULL COMMENT 'UTC time this DR op was recorded',
-      operation         STRING    NOT NULL COMMENT 'EXPORT|IMPORT|VERIFY|GRANTS|ENDPOINT|DEPENDENCY|FAILOVER|FAILBACK|HEALTH',
+      operation         STRING    NOT NULL COMMENT 'EXPORT|IMPORT|VERIFY|GRANTS|DEPENDENCY|FAILOVER|FAILBACK|HEALTH',
       direction         STRING             COMMENT 'e.g. us-west-2->us-east-1',
       triggered_by      STRING             COMMENT 'SCHEDULE|AUDIT_EVENT|MANUAL (legacy)',
       model_name        STRING             COMMENT 'Fully-qualified model name or CSV/*',
@@ -114,7 +114,7 @@ STATEMENTS = [
       error_message     STRING             COMMENT 'Failure detail / operator note',
       tool_version      STRING             COMMENT 'Replication engine version (native-<mlflow>)',
       actor             STRING             COMMENT 'Principal that ran the op (SPN)',
-      object_type       STRING             COMMENT 'model|version|run|experiment|prompt|trace|eval_dataset|logged_model|alias|grant|endpoint|notebook',
+      object_type       STRING             COMMENT 'model|version|run|experiment|prompt|trace|eval_dataset|logged_model|alias|grant|notebook',
       action            STRING             COMMENT 'CREATE|UPDATE|DELETE|ALIAS_SET|NONE',
       trigger_type      STRING             COMMENT 'MANUAL|SCHEDULE|AUDIT_SCAN|MODEL_TRIGGER',
       source_event_id   STRING             COMMENT 'system.access.audit event_id correlation',
@@ -139,7 +139,7 @@ STATEMENTS = [
     # --- desired-state inventory (idempotent reconciliation + health) ---
     f"""CREATE TABLE IF NOT EXISTS {CAT}.{CTL}.dr_object_inventory (
       object_key          STRING    NOT NULL COMMENT 'Fully-qualified object id (e.g. model name)',
-      object_type         STRING    NOT NULL COMMENT 'model|endpoint|... (DR module object type)',
+      object_type         STRING    NOT NULL COMMENT 'model (DR module object type)',
       source_region       STRING             COMMENT 'Region the object was authored in',
       last_source_version STRING             COMMENT 'Last source version observed/synced',
       alias_map           STRING             COMMENT 'JSON {{alias: version}} last synced',
@@ -214,8 +214,20 @@ for sql in STATEMENTS:
         # fresh CREATE the columns already exist, so an "already exists" error here
         # is expected and safe to skip. Any other error is re-raised.
         msg = str(e).lower()
-        if "add columns" in sql.lower() and ("already exist" in msg or "field_already_exists" in msg):
+        low = sql.lower().lstrip()
+        if "add columns" in low and ("already exist" in msg or "field_already_exists" in msg):
             print("skip (columns already present):", preview)
+        elif low.startswith("create catalog") and (
+            "create catalog" in msg or "unauthorized" in msg or "permission_denied" in msg
+        ):
+            # We lack CREATE CATALOG on the metastore, but the catalog may already be
+            # provisioned (e.g. by TF/admin). UC checks the privilege before IF NOT
+            # EXISTS short-circuits, so this is expected -- skip iff the catalog exists.
+            exists = spark.sql(f"SHOW CATALOGS LIKE '{CAT}'").count() > 0  # noqa: F821
+            if exists:
+                print(f"skip (no CREATE CATALOG on metastore; '{CAT}' already exists):", preview)
+            else:
+                raise
         else:
             raise
 

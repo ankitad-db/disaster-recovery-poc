@@ -81,7 +81,7 @@ SEC_S, SEC_BG = "#9c36b5", "#f8f0fc"
 
 # Title
 text(700, 30, "Databricks Model DR — Cross-Workspace Pull (no CRR)", size=30, color="#1e1e1e", bold=True)
-text(700, 78, "Replicates UC models + versions, experiments/runs, grants & serving endpoints. Audit + dr_state control plane.", size=16, color="#495057")
+text(700, 78, "Replicates UC models + versions, experiments/runs & grants. Audit + dr_state control plane. (Serving endpoints out of scope.)", size=16, color="#495057")
 
 # ---------- EAST (PRIMARY) ----------
 rect(60, 140, 900, 940, WEST_S, WEST_BG)
@@ -103,15 +103,15 @@ rect(655, 235, 280, 300, CTL_S, "#ffffff")
 text(675, 248, "Control plane  ·  dr_control", size=14, color=CTL_S, bold=True)
 rect(675, 288, 240, 95, CTL_S, CTL_BG)
 text(688, 298, "dr_replication_audit", size=13, bold=True)
-text(688, 322, "every EXPORT/IMPORT/VERIFY\nGRANTS/ENDPOINT/HEALTH\n+ CDC watermark", size=11, color="#495057")
+text(688, 322, "every EXPORT/IMPORT/VERIFY\nGRANTS/FAILOVER/HEALTH\n+ CDC watermark", size=11, color="#495057")
 rect(675, 398, 240, 110, CTL_S, CTL_BG)
 text(688, 408, "dr_state (single row)", size=13, bold=True)
 text(688, 432, "active_primary = east\nfailover/failback flips it\n(read by every job run)", size=11, color="#495057")
 
-# East serving endpoint
-rect(95, 560, 400, 110, WEST_S, "#ffffff")
-text(115, 572, "Model Serving endpoint (ACTIVE)", size=14, bold=True)
-text(115, 598, "iris-dr-endpoint  →  dr_poc.ml.iris_dr_model:vN\nserves consumer REST traffic", size=12, color="#495057")
+# East serving endpoint (consumer-managed; OUT OF DR SCOPE)
+rect(95, 560, 400, 110, "#adb5bd", "#f1f3f5")
+text(115, 572, "Serving endpoint (consumer-managed)", size=14, bold=True)
+text(115, 598, "out of DR scope — points at the model;\nrecreate from config at failover", size=12, color="#495057")
 
 # East DBFS
 rect(515, 560, 420, 110, WEST_S, "#ffffff")
@@ -160,9 +160,9 @@ text(EX + 50, 594, "dr_poc.dr_control.dr_staging  (S3-backed UC Volume)\nexports
 rect(EX + 460, 556, 430, 220, EAST_S, "#ffffff")
 text(EX + 480, 568, "MLflow Model Registry (WEST)", size=14, bold=True)
 text(EX + 480, 594, "dr_poc.ml.iris_dr_model  →  v1..vN (imported)\nexperiments under /Shared/dr/experiments\ngrants mirrored (USE CATALOG/SCHEMA/EXECUTE)", size=12, color="#495057")
-rect(EX + 480, 678, 390, 78, EAST_S, EAST_BG)
-text(EX + 492, 688, "Serving endpoint (STANDBY → ACTIVE)", size=13, bold=True)
-text(EX + 492, 712, "iris-dr-endpoint mirrored scale-to-zero;\nfailover scales it up to serve", size=11, color="#495057")
+rect(EX + 480, 678, 390, 78, "#adb5bd", "#f1f3f5")
+text(EX + 492, 688, "Serving endpoint (not replicated)", size=13, bold=True)
+text(EX + 492, 712, "out of DR scope; recreate from config\nat failover (operational step)", size=11, color="#495057")
 
 # West control plane (mirror)
 rect(EX + 30, 690, 410, 86, CTL_S, "#ffffff")
@@ -178,8 +178,8 @@ arrow(EX + 30, 320, 615, 330, color=ENG_S, label="1 · EXPORT  (ambient = EAST v
 arrow(615, 470, EX + 235, 556, color="#1e1e1e", label="2 · artifacts → local staging Volume")
 # 3. IMPORT into WEST registry
 arrow(EX + 235, 620, EX + 460, 620, color=EAST_S, label="3 · IMPORT (local)")
-# 4. grants + endpoints mirror
-arrow(495, 615, EX + 460, 705, color="#1e1e1e", dashed=True, label="4 · grants + endpoint mirror (standby)")
+# 4. grants mirror
+arrow(495, 615, EX + 460, 705, color="#1e1e1e", dashed=True, label="4 · grants mirror")
 # 5. audit/state writes
 arrow(EX + 230, 445, EX + 230, 690, color=CTL_S, dashed=True, label="5 · audit + dr_state")
 
@@ -187,7 +187,7 @@ arrow(EX + 230, 445, EX + 230, 690, color=CTL_S, dashed=True, label="5 · audit 
 rect(60, 1110, 2340, 150, "#e03131", "#fff5f5")
 text(90, 1122, "FAILOVER  &  FAILBACK", size=20, color="#e03131", bold=True)
 text(90, 1158,
-     "FAILOVER (run in WEST):  no pull (primary may be down) — west already warm; scale up endpoint; write FAILOVER row; dr_state → west.  Repoint consumers.",
+     "FAILOVER (run in WEST):  no pull (primary may be down) — west already warm; readiness/RPO gate; write FAILOVER row; dr_state → west.  Repoint consumers.",
      size=13, color="#495057")
 text(90, 1188,
      "FAILBACK (run in EAST):  reverse CDC west→east via dr_remote_west pulls outage-time versions; write FAILBACK row; dr_state → east.  Steady state restored.",

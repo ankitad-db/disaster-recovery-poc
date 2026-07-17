@@ -1,13 +1,13 @@
 # Databricks Asset Bundle for the DR framework.
 # Deploys the repo + scheduled DR workflows to a target workspace.
 #
-# Current topology (config/dr_config.yaml): primary = east (krish),
-# secondary = west (ankita). Steady-state jobs run in the SECONDARY (they pull from
-# the primary), so `west` is the day-to-day deploy/run target; `east` is failback.
+# Current topology (config/dr_config.yaml): primary = east (fevm-ps, us-east-2),
+# secondary = west (krish, us-west-2). Steady-state jobs run in the SECONDARY (they
+# pull from the primary), so `west` is the day-to-day deploy/run target; `east` is failback.
 #
 #   databricks bundle validate -t west
 #   databricks bundle deploy   -t west       # secondary (us-west-2): steady-state DR jobs
-#   databricks bundle deploy   -t east       # primary  (us-east-1): for failback jobs
+#   databricks bundle deploy   -t east       # primary  (us-east-2): for failback jobs
 #
 # Go live (unpause schedules):
 #   databricks bundle deploy -t west --var cdc_pause_status=UNPAUSED
@@ -60,10 +60,10 @@ targets:
     mode: development
     workspace:
       profile: dr-west
-      host: https://fe-sandbox-ankita-dr-wp-us-west-2.cloud.databricks.com
+      host: https://fevm-krish-dr-fevm-us-west-2.cloud.databricks.com
 
   east:
     mode: development
     workspace:
       profile: dr-east
-      host: https://fe-sandbox-krish-us-eat-1-sandbox.cloud.databricks.com
+      host: https://fevm-fevm-ps-dr-us-east-2.cloud.databricks.com

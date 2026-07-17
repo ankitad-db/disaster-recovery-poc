@@ -19,6 +19,25 @@ from ...common.logging import get_logger
 
 _logger = get_logger(__name__)
 
+
+def _safe_set_tag(fn, *args) -> None:
+    """Apply a tag, tolerating account-level governed tag policies.
+
+    Some accounts enforce governed tag policies that constrain the allowed values
+    for a key (e.g. ``validation_status`` in [valid, invalid]). A seed tag that
+    violates such a policy must not abort the whole seeding run -- we log and skip
+    it. ``fn`` is a client tag setter; the last two args are (key, value).
+    """
+    try:
+        fn(*args)
+    except Exception as e:  # noqa: BLE001
+        msg = str(e).lower()
+        if "tag policy" in msg or "not an allowed value" in msg:
+            _logger.warning("Skipped governed tag %r=%r: %s", args[-2], args[-1], str(e)[:160])
+        else:
+            raise
+
+
 # sklearn datasets we can seed from (all classification, all return_X_y/as_frame).
 _DATASETS = {
     "iris": "load_iris",
@@ -133,8 +152,10 @@ def _seed_one_model(cfg: Config, *, name: str, dataset: str = "iris", n_versions
             name, last_version,
             description=f"{dataset} RandomForest v{i} (n_estimators={40 + i * 10}, max_depth={4 + i})",
         )
-        client.set_model_version_tag(name, last_version, "seed_iteration", str(i))
-        client.set_model_version_tag(name, last_version, "validation_status", "passed")
+        _safe_set_tag(client.set_model_version_tag, name, last_version, "seed_iteration", str(i))
+        # "valid" satisfies the common governed tag policy for validation_status
+        # ([valid, invalid]); _safe_set_tag also tolerates accounts with stricter ones.
+        _safe_set_tag(client.set_model_version_tag, name, last_version, "validation_status", "valid")
 
     # Registered-model description + aliases + tags (consumer-facing handles we replicate)
     client.update_registered_model(
@@ -142,8 +163,8 @@ def _seed_one_model(cfg: Config, *, name: str, dataset: str = "iris", n_versions
     client.set_registered_model_alias(name, "Champion", last_version)
     if int(last_version) > 1:
         client.set_registered_model_alias(name, "Challenger", str(int(last_version) - 1))
-    client.set_registered_model_tag(name, "owner", "dr-poc")
-    client.set_registered_model_tag(name, "dr_managed", "true")
+    _safe_set_tag(client.set_registered_model_tag, name, "owner", "dr-poc")
+    _safe_set_tag(client.set_registered_model_tag, name, "dr_managed", "true")
 
     _logger.info("Seeded %s (versions=1..%s)", name, last_version)
     return name

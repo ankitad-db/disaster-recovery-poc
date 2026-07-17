@@ -294,8 +294,8 @@ flowchart TD
     Steady([Steady state<br/>east=primary, west=secondary<br/>CDC east→west keeps west warm]) --> Boom{{Disaster:<br/>east region down}}
 
     Boom --> FO[FAILOVER — run in WEST<br/><b>notebooks/04 action=failover</b><br/>failover.py run_failover]
-    FO --> FO1[No pull — west already mirrored.<br/>Scale up local endpoints,<br/>insert FAILOVER audit row]
-    FO1 --> FO2[run_failover persists<br/>dr_state active_primary=west.<br/>Operator repoints consumers to west]
+    FO --> FO1[No pull — west already mirrored.<br/>Readiness/RPO preflight (blocker gate + force),<br/>insert FAILOVER audit row]
+    FO1 --> FO2[run_failover persists + verifies<br/>dr_state active_primary=west.<br/>Operator repoints consumers to west]
     FO2 --> Outage[West serves;<br/>new model versions created in west]
 
     Outage --> Recover{{East region recovers}}
@@ -315,21 +315,21 @@ flowchart TD
 > RPO is whatever the last CDC achieved. The secondary is promoted as-is. Pulling is
 > only for failback, once the home region is healthy again.
 
-### Serving-endpoint DR
+### Serving endpoints are out of scope
 
-Serving endpoints aren't carried by mlflow-export-import, so they're handled
-separately by `modules/models/endpoints.py` using the same cross-workspace identity
-(run in dest, read source via secret scope, apply locally):
+This framework replicates **model objects only** — registered models, versions,
+aliases, tags, backing runs/experiments, and (version-gated) MLflow 3 / GenAI
+artifacts — plus the consumer-facing UC **grants** and model **dependencies** around
+them. Serving endpoints are **not** replicated.
 
-| Phase | Function | What it does |
-|---|---|---|
-| Steady state (replicate/cdc) | `mirror_endpoints` | for each in-scope model, recreate the source's endpoints on the dest in **standby** (scale-to-zero), so the route exists and is cheap |
-| Failover (`run_failover`) | `activate_endpoints` | scale the dest endpoints **up** (disable scale-to-zero) so they actively serve |
-
-Gated by `models.replicate_serving_endpoints` and non-fatal (each writes an
-`ENDPOINT` audit row). Model versions line up because the import preserves version
-numbers. The remaining manual bit is **routing consumers** to the dest endpoint URL
-(DNS/gateway), which lives outside Databricks.
+Rationale: an endpoint carries no artifacts — it is a thin, declarative pointer to
+`model@version` plus serving config. Because the model versions are already
+replicated (with version numbers preserved), an endpoint can be (re)created on the
+destination cheaply at failover time from config alone, independent of the DR data
+path. Keeping endpoints out of the core keeps the framework focused on the one thing
+that must be correct and complete — the model artifacts and their lineage. Endpoint
+(re)creation and consumer **routing** (DNS/gateway) are treated as an operational
+step outside this framework.
 
 ---
 
@@ -444,8 +444,8 @@ failover rather than competing with it.
 | Stable workspace URL across failover | yes | no (uses Managed DR's, when present) |
 | Failover orchestration for covered assets | yes | no |
 | **ML models / versions / aliases / runs / experiments** | **no** | **yes** |
-| **Model serving endpoints** | **no** | **yes** (standby → activate) |
 | **MLflow 3 / GenAI (logged models, prompts, eval datasets, traces)** | **no** | **yes** (version-gated) |
+| Model serving endpoints | no | no (out of scope — recreate from config at failover) |
 | Vector Search, Secrets, Delta Sharing, Volume data, Apps, Genie | no | planned modules |
 
 ### Standalone, but compatible
@@ -462,10 +462,10 @@ it does nothing and is safe to call.
 ```mermaid
 flowchart TD
     MDR[Managed DR fails workspace over to secondary<br/>UC metadata/grants + table data + stable URL] --> Seam[managed_dr.on_failover seam<br/>align dr_state to the promoted region]
-    Seam --> DIYFO[DIY failover: promote standby models +<br/>activate serving endpoints in the new active region]
+    Seam --> DIYFO[DIY failover: promote standby models<br/>in the new active region]
     DIYFO --> CDC[Steady-state CDC resumes in the new direction]
     CDC --> Back{Home region recovers}
-    Back --> FB[Managed DR fails back, then DIY failback<br/>resyncs models/endpoints to home + resets dr_state]
+    Back --> FB[Managed DR fails back, then DIY failback<br/>resyncs models to home + resets dr_state]
 ```
 
 ### RPO / RTO notes
@@ -475,8 +475,8 @@ flowchart TD
   primary — the secondary is promoted at whatever the last successful CDC achieved.
   The audit table's `source_event_time` / `rpo_lag_sec` make the actual lag visible.
 - **RTO (models):** the time to promote the standby (no data movement on failover)
-  plus serving-endpoint scale-up and consumer re-routing. Because the secondary is a
-  *warm* mirror with version numbers preserved, promotion is fast.
+  plus any consumer re-routing. Because the secondary is a *warm* mirror with version
+  numbers preserved, promotion is fast.
 - **Coverage gap is explicit:** anything in the "planned modules" rows above is not
   yet protected by DIY DR; that gap is tracked per object type so customers know
   exactly what is and isn't covered until Managed DR closes it natively.

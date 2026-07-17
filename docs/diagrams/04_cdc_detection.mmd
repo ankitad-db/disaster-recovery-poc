@@ -1,0 +1,18 @@
+---
+title: CDC Change Detection - Decision per Model
+---
+flowchart TD
+    A["For each in-scope model<br/>(read live under source identity)"] --> B{"source max version<br/>&gt; watermark?"}
+    B -- yes --> SYNC["CHANGED -> sync delta<br/>(new versions + metadata)"]
+    B -- no --> C{"metadata signature<br/>drifted vs inventory?"}
+    C -- "yes (alias/tag/desc changed)" --> SYNC
+    C -- no --> D{"audit-event scan hit?<br/>(only if cdc_use_system_tables)"}
+    D -- yes --> SYNC
+    D -- no --> SKIP["UP TO DATE -> skip"]
+
+    SYNC --> E["watermark advances on IMPORT SUCCESS<br/>signature stored in dr_object_inventory"]
+
+    classDef sync fill:#e6f4ea,stroke:#137333,color:#0b3d1f;
+    classDef skip fill:#f1f3f4,stroke:#5f6368,color:#202124;
+    class SYNC,E sync;
+    class SKIP skip;

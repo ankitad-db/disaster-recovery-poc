@@ -95,9 +95,12 @@ def export_model(
     prompt_names: Optional[list] = None,
     eval_dataset_names: Optional[list] = None,
     replicate_traces: bool = False,
+    skip_versions: Optional[set] = None,
 ):
     """Export one registered model (versions, runs, logged models, GenAI).
 
+    ``skip_versions`` restricts the bundle to versions the destination does not yet
+    have (delta/CDC path); registered-model metadata is always captured in full.
     Returns the engine ``Manifest`` so callers can record bytes/version counts.
     """
     _logger.info("export_model model=%s out=%s uri=%s", model, output_dir, registry_uri)
@@ -107,6 +110,7 @@ def export_model(
         export_permissions=export_permissions, notebook_formats=notebook_formats,
         max_workers=max_workers, prompt_names=prompt_names,
         eval_dataset_names=eval_dataset_names, replicate_traces=replicate_traces,
+        skip_versions=skip_versions,
     )
 
 

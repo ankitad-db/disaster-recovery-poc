@@ -74,7 +74,7 @@ text(360, 86, "The DR job runs in the secondary and PULLS from the primary. No c
 # 1. PRIMARY registry (source)
 rect(120, 200, 360, 200, WEST_S, WEST_BG)
 text(150, 218, "PRIMARY · us-east-1", size=20, color=WEST_S, bold=True)
-text(150, 256, "MLflow Model Registry\n\ndr_poc.ml.iris_dr_model\nv1..vN  (+ runs, grants,\nserving endpoint)", size=15, color="#1e1e1e")
+text(150, 256, "MLflow Model Registry\n\ndr_poc.ml.iris_dr_model\nv1..vN  (+ runs, grants)", size=15, color="#1e1e1e")
 
 # 2. West bucket (landing)
 rect(770, 220, 300, 160, EAST_S, "#ffffff")
@@ -84,7 +84,7 @@ text(795, 272, "exported bundle lands on\nthe staging Volume\n(local to secondar
 # 3. SECONDARY registry (dest)
 rect(1360, 200, 360, 200, EAST_S, EAST_BG)
 text(1390, 218, "SECONDARY · us-west-2", size=20, color=EAST_S, bold=True)
-text(1390, 256, "MLflow Model Registry\n\nsame models imported\nv1..vN  (+ runs, grants,\nendpoint in standby)", size=15, color="#1e1e1e")
+text(1390, 256, "MLflow Model Registry\n\nsame models imported\nv1..vN  (+ runs, grants)", size=15, color="#1e1e1e")
 
 # DR engine (under the flow)
 rect(120, 470, 1600, 120, ENG_S, ENG_BG)
@@ -106,7 +106,7 @@ arrow(1070, 300, 1360, 300, color=EAST_S, label="2 · IMPORT (local identity)")
 # Failover / failback band
 rect(120, 770, 1600, 150, "#e03131", "#fff5f5")
 text(150, 784, "FAILOVER  &  FAILBACK", size=20, color="#e03131", bold=True)
-text(150, 822, "FAILOVER (in WEST): promote west (already warm), scale up endpoint, dr_state → west. Repoint consumers.", size=14, color="#495057")
+text(150, 822, "FAILOVER (in WEST): promote west (already warm), readiness/RPO gate, dr_state → west. Repoint consumers.", size=14, color="#495057")
 text(150, 852, "FAILBACK (in EAST): reverse pull west → east to recover outage-time versions, dr_state → east.", size=14, color="#495057")
 text(150, 886, "Same code both ways — direction comes from dr_state, not hardcoded.", size=13, color="#e03131")
 

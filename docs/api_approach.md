@@ -74,9 +74,8 @@ src/databricks_dr/
     baseline.py              #   split export / import (run_export, run_import, run_baseline)
     replicate.py             #   cross-workspace pull (run_replicate) + ID-mapping persist
     cdc.py                   #   incremental sync (run_cdc) via changefeed
-    failover.py              #   run_failover / run_failback (role flip + endpoint scale)
+    failover.py              #   run_failover / run_failback (gated role flip + RPO)
     grants.py                #   UC grants mirroring
-    endpoints.py             #   serving-endpoint mirror / activate
     dependencies.py          #   per-model dependency validation
     health.py                #   drift/failure check (raises to fail a job)
     _selection.py            #   resolve_models(include) -> concrete names
@@ -216,8 +215,8 @@ Maps the `BaseDRModule` lifecycle to the per-concern files:
 | `health()` | `health.run_health_check` | raises on problems. |
 | `failover()`/`failback()` | `failover.run_failover`/`run_failback` | role flip. |
 
-`_replicate_extras` runs the consumer-facing extras (grants, serving endpoints) after
-models land — each non-fatal so one hiccup never fails an otherwise-good replication.
+`_replicate_extras` runs the consumer-facing extras (UC grants) after models land —
+non-fatal so one hiccup never fails an otherwise-good replication.
 
 ---
 
@@ -236,7 +235,7 @@ your real training pipeline.
   + `rel_export_dir`, `engine.export_models(...)` to the staging path, `write_latest_pointer`.
   Audited as `EXPORT`.
 - `run_import(ctx, rel)` — read `_latest.txt`, `engine.import_models(...)` into the
-  **dest**, then `_persist_id_mappings(...)` (writes `dr_id_mapping`). Audited as `IMPORT`.
+  **dest**, then `_idmap.persist(...)` (writes `dr_id_mapping`). Audited as `IMPORT`.
 - `run_baseline(ctx)` — export → (optional bridge) → import in one process (laptop/CLI).
 
 ### `replicate.py` — cross-workspace pull (recommended)
@@ -245,29 +244,40 @@ your real training pipeline.
 - **EXPORT phase** under `_ambient_identity(host, token)`: for each model,
   `engine.export_model(...)` into `<staging>/<ts>/models/<model>`; record source versions
   + bytes; audit `EXPORT`.
-- **IMPORT phase** under `_ambient_identity(None, None)` (local identity): per model,
-  `engine.import_model(...)` → `ImportResult`, `_verify_import` (fails loudly if any
-  expected version is missing — a partial import is never logged `SUCCESS`),
-  `_persist_id_mapping(ctx, result, audit_id)`; audit `IMPORT`.
+- **IMPORT phase** under `_ambient_identity(None, None)` (local identity), for each model
+  that exported OK: `engine.import_model(...)` → `ImportResult`, `_verify_import` (fails
+  loudly if any expected version is missing — a partial import is never logged `SUCCESS`),
+  `_idmap.persist(ctx, result, audit_id)`, then `_upsert_inventory(...)`; audit `IMPORT`.
+- **Per-model resilience**: each export/import is wrapped in `retry_call` (bounded
+  exponential backoff on *transient* errors only — throttling/5xx/network; `retry_count`
+  is recorded on the audit row). A model that still fails is recorded `FAILED` and the run
+  **continues** with the rest; after all models are attempted an aggregated `RuntimeError`
+  is raised if any failed, so the job fails loudly while healthy models are already synced
+  (`models.retry_attempts` / `models.retry_base_delay` tune it).
 - `models_override` lets CDC replicate only changed models.
 
 ### `cdc.py` — incremental sync
 `run_cdc(ctx)`: compute the last scan watermark; under the source identity,
-`changefeed.detect_changes(...)`; if nothing changed → log and return; else
-`replicate.run_replicate(full=False, delete_model=True, models_override=changed)` and
-write a per-model `VERIFY` row (carrying `source_event_time` for RPO). Idempotent.
+`changefeed.detect_changes(...)` (version diff + metadata-signature drift, optionally
+an audit-event scan); if nothing changed → log and return; else
+`replicate.run_replicate(full=False, delete_model=False, models_override=changed)` — an
+incremental **delta**: export skips versions the dest already holds and import appends
+new versions + reconciles metadata without dropping the model. Then write a per-model
+`VERIFY` row (carrying `source_event_time` for RPO). Idempotent.
 `cdc_use_system_tables` (default `false`) decides whether the audit-event scan runs.
 
-### `failover.py` — role flip
+### `failover.py` — gated role flip
 - `run_failover(ctx)` — runs IN the secondary; **does not pull** (primary may be down —
-  the secondary is already a warm mirror). Scales up endpoints, writes a `FAILOVER` audit
-  marker, and `state.set_active_primary(dest)` so scheduled jobs honour the flip.
-- `run_failback(ctx)` — after a reverse-direction CDC (driven with `failback=True`), scale
-  up endpoints, write a `FAILBACK` marker, and reset `dr_state` to the **home** primary.
+  the secondary is already a warm mirror). Runs a readiness/RPO preflight
+  (`health.assess_replication`), gates on blockers unless `force`, writes a `FAILOVER`
+  audit marker with the RPO summary, and persists + verifies `state.set_active_primary(dest)`
+  so scheduled jobs honour the flip.
+- `run_failback(ctx)` — after a reverse-direction CDC (driven with `failback=True`),
+  gates on the reverse catch-up being complete (unless `force`), writes a `FAILBACK`
+  marker, and resets `dr_state` to the **home** primary.
 
-### `grants.py` / `endpoints.py` / `dependencies.py` / `health.py`
+### `grants.py` / `dependencies.py` / `health.py`
 Consumer-facing extras + verification: UC grants mirroring (remote-read, local-apply),
-serving-endpoint mirror (standby, scale-to-zero) and `activate_endpoints` on failover,
 per-model dependency replication, and `run_health_check` (confirms each model is present
 and at/above its watermark, scans recent `FAILED` rows, **raises** so a job task fails).
 
@@ -325,7 +335,7 @@ WHERE id_type='experiment' AND model_name='dr_poc.ml.iris_dr_model';
 
 | Table / view | Written by | Purpose |
 |---|---|---|
-| `dr_replication_audit` | `AuditLog` (every phase) | source of truth: one row per EXPORT/IMPORT/VERIFY/GRANTS/ENDPOINT/FAILOVER/FAILBACK; backs the CDC watermark. |
+| `dr_replication_audit` | `AuditLog` (every phase) | source of truth: one row per EXPORT/IMPORT/VERIFY/GRANTS/FAILOVER/FAILBACK; backs the CDC watermark. |
 | `dr_id_mapping` | `IdMappingLog` (after import) | source↔dest experiment/run/version IDs. |
 | `dr_object_inventory` | reconciliation | desired-state snapshot per object (last source version, alias map). |
 | `dr_state` | `state.py` (failover/failback) | single-row active-primary role; the direction source of truth. |
@@ -345,7 +355,7 @@ WHERE id_type='experiment' AND model_name='dr_poc.ml.iris_dr_model';
 - `storage.staging_volume` — 3-level UC Volume for bundles (unset → DBFS root fallback).
 - `secrets.{east,west}` — secret scope (in the *other* workspace) holding host + SPN token.
 - `models` — `include` (replication scope), `seed` (POC seeding spec), `export_*`,
-  `replicate_grants`, `replicate_serving_endpoints`, `max_workers`, `notebook_formats`,
+  `replicate_grants`, `detect_metadata_drift`, `max_workers`, `notebook_formats`,
   `prompts`/`evaluation_datasets`/`replicate_traces` (GenAI), `cdc_use_system_tables`.
 
 ---
@@ -355,7 +365,7 @@ WHERE id_type='experiment' AND model_name='dr_poc.ml.iris_dr_model';
 Notebooks (`notebooks/`, thin wrappers — each `%run ./_bootstrap` then call a module fn):
 `00_setup` (control plane + staging volume + grants), `01_seed_primary`, `02_replicate_secondary`,
 `02a_export_primary` / `02b_import_secondary` (split halves), `03_cdc`,
-`04_failover_failback` (`action` widget), `05_health_check`, `06_test_endpoints`,
+`04_failover_failback` (`action` widget), `05_health_check`,
 `drill_failover` / `drill_failback` (self-asserting rehearsal pair).
 
 CLI: `python -m databricks_dr models <seed|baseline|replicate|cdc|failover|failback|health>`

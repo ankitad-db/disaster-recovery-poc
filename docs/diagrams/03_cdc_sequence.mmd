@@ -1,0 +1,31 @@
+---
+title: Steady-State CDC - Sequence (EAST to WEST)
+---
+sequenceDiagram
+    autonumber
+    participant SCH as Scheduler in WEST
+    participant JOB as CDC job in WEST
+    participant DRS as dr_state
+    participant SRC as EAST registry source
+    participant VOL as WEST staging volume
+    participant DST as WEST registry dest
+    participant AUD as Audit and inventory
+
+    SCH->>JOB: trigger every ~15m
+    JOB->>DRS: read active_primary
+    DRS-->>JOB: east, so direction = EAST to WEST
+    JOB->>SRC: assume source identity, list models and versions
+    JOB->>AUD: read per-model watermark and last signature
+    Note over JOB: detect_changes = version diff + metadata drift + optional audit scan
+    alt nothing changed
+        JOB->>AUD: log nothing to sync
+    else changed models
+        JOB->>DST: pre-scan versions WEST already holds
+        JOB->>SRC: export delta, skip synced versions, with retry
+        SRC-->>VOL: bundle of new versions plus full metadata
+        JOB->>DST: import append-only, delete_model=false, with retry
+        JOB->>DST: verify imported versions equal expected
+        JOB->>AUD: IMPORT SUCCESS, watermark advances, upsert signature
+        JOB->>AUD: VERIFY row with source_event_time for RPO
+    end
+    Note over JOB,AUD: per-model isolation - one failing model is recorded, others continue, job fails loudly at end

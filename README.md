@@ -19,7 +19,8 @@ as new modules under `src/databricks_dr/modules/` without changing the core.
   records every action; a single-row **`dr_state`** table holds the active-primary role so failover
   survives across job runs.
 - **Direction is parameterized:** failover/failback flip the role (in `dr_state`); the same code
-  runs both ways. Consumer-facing extras (UC grants, serving endpoints) replicate alongside models.
+  runs both ways. Consumer-facing UC grants replicate alongside models. Scope is **model objects
+  only** — serving endpoints are out of scope (recreate from config at failover).
 
 See the architecture in [docs/architecture.md](docs/architecture.md). For the **asserted,
 copy-paste end-to-end test** (seed → baseline → change → CDC → failover → failback, with
@@ -103,7 +104,7 @@ src/databricks_dr/
   cli.py                 # python -m databricks_dr <module> <action>
   common/                # config, clients, engine adapter, storage, audit, logging
   core/                  # BaseDRModule ABC + module registry
-  modules/models/        # models DR: seed/baseline/replicate/cdc/grants/deps/endpoints/health/failover
+  modules/models/        # models DR: seed/baseline/replicate/cdc/grants/deps/health/failover
 config/dr_config.yaml    # workspaces, metastores, external locations + staging volume, UC names, secret scopes
 sql/                     # catalog/schema + audit + dr_state DDL
 notebooks/               # thin Databricks wrappers (00 setup … drills)
@@ -183,7 +184,7 @@ notebook** creates the volume on the correct S3 bucket in each workspace.
 | Step | Notebook | Run in | What it does |
 |---|---|---|---|
 | 4a | `01_seed_primary.py` | **EAST** (primary) | Seeds the POC models from `models.seed` (default: `iris` v1-2, `wine` v1-3, `cancer` v1-2 — each version is its own backing run), with aliases + tags. *In production this is your real training pipeline — skip it; the models already exist.* |
-| 4b | `02_replicate_secondary.py` | **WEST** (secondary) | **Baseline pull** EAST→WEST: full export/import of all in-scope models + versions + runs, plus grants and serving endpoints (standby). |
+| 4b | `02_replicate_secondary.py` | **WEST** (secondary) | **Baseline pull** EAST→WEST: full export/import of all in-scope models + versions + runs, plus UC grants. |
 
 After 4b, WEST is a warm mirror of EAST.
 
@@ -230,7 +231,7 @@ ways. There are **two entry points**, for two different situations:
 
 | | Use when | Run in | Behaviour |
 |---|---|---|---|
-| **Real event** — `04_failover_failback.py` | An actual regional outage / planned migration. | `failover` in **WEST** (secondary), then `failback` in **EAST** (home primary) (via the `action` widget) | Performs the real action only. `failover` promotes WEST (no pull — primary may be down — just records a `FAILOVER` audit row, scales up endpoints, sets `dr_state=west`; you repoint consumers). `failback` runs reverse CDC `west→east` to recover outage-time versions, writes a `FAILBACK` marker, and resets `dr_state=east`. |
+| **Real event** — `04_failover_failback.py` | An actual regional outage / planned migration. | `failover` in **WEST** (secondary), then `failback` in **EAST** (home primary) (via the `action` widget) | Performs the real action only. `failover` promotes WEST (no pull — primary may be down — runs a readiness/RPO preflight, records a `FAILOVER` audit row, sets `dr_state=west`; you repoint consumers). `failback` runs reverse CDC `west→east` to recover outage-time versions, writes a `FAILBACK` marker, and resets `dr_state=east`. |
 | **Drill / rehearsal** — `drill_failover.py` + `drill_failback.py` | Proving the runbook works — scheduled DR tests, audits/compliance, after infra changes, onboarding. **No real outage.** | `drill_failover.py` in **WEST** first, then `drill_failback.py` in **EAST** | Self-asserting, end-to-end loop. Failover side promotes WEST **and simulates outage work** (logs a new model version in WEST), then asserts `dr_state=west`, a new version exists, and a `FAILOVER` audit row landed. Failback side reverse-CDCs that simulated version into EAST, then asserts it was recovered and `dr_state=east` (steady state restored). Each half **raises on failure**, so as a scheduled job task it goes red and alerts. |
 
 **When to use the drills**
@@ -269,7 +270,7 @@ dr_poc.ml.iris_dr_model`.
 |---|---|---|---|
 | 1 | Keep WEST current (steady state) | WEST | `03_cdc.py` (or scheduled `dr_models_cdc`) |
 | 2 | **Outage:** EAST region down → **failover** | WEST | `04_failover_failback.py` `action=failover` |
-| 3 | Repoint consumers/endpoints to WEST | — | (operational) |
+| 3 | Repoint consumers to WEST (incl. re-creating any serving endpoints from config) | — | (operational, outside this framework) |
 | 4 | New model versions produced while WEST is primary | WEST | your training pipeline |
 | 5 | EAST recovers → **failback** | EAST | `04_failover_failback.py` `action=failback` |
 
@@ -287,7 +288,6 @@ SELECT * FROM dr_replication_audit WHERE operation='FAILOVER' ORDER BY event_tim
   print(sorted(int(v.version) for v in c.search_model_versions(f"name='{m}'")))   # all baseline versions present
   print({k.lower(): v for k, v in c.get_registered_model(m).aliases.items()})      # Champion/Challenger preserved
   ```
-- If serving endpoints are in scope: the WEST standby endpoint scaled up (Catalog Explorer → Serving, or the `ENDPOINT` audit rows).
 
 After **failback** (in EAST):
 ```sql
