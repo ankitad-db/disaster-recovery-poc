@@ -53,14 +53,19 @@ def run_seed(cfg: SecretsConfig, *, wc=None) -> Dict[str, Any]:
         for key in sc.get("keys", []):
             wc.secrets.put_secret(scope=name, key=key, string_value=_rand_value())
         for a in sc.get("acls", []):
+            principal = a["principal"]
+            # 'current_user' resolves to the running identity (always exists), so the
+            # POC has a real ACL to exercise the export/import ACL path.
+            if principal == "current_user":
+                principal = wc.current_user.me().user_name
             try:
-                wc.secrets.put_acl(scope=name, principal=a["principal"],
+                wc.secrets.put_acl(scope=name, principal=principal,
                                    permission=_acl_permission(a.get("permission", "READ")))
             except Exception as e:  # noqa: BLE001
                 # Principal may not exist in this workspace -- warn + continue so a
                 # bad ACL entry never aborts seeding.
                 _logger.warning("Skipped ACL %s on scope %s: %s",
-                                a.get("principal"), name, str(e)[:140])
+                                principal, name, str(e)[:140])
         created.append({"scope": name, "keys": len(sc.get("keys", []))})
 
     _logger.info("Seeded %d scope(s): %s", len(created), [c["scope"] for c in created])
