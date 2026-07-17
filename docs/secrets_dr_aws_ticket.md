@@ -6,7 +6,7 @@ regions, and policies are fully specified — please create exactly these. There
 no design decisions to make.
 
 ## Fixed facts
-- **AWS account:** `049629455384`
+- **AWS account:** `997819012307`
 - **Regions:** `us-east-2` (primary), `us-west-2` (secondary)
 
 ---
@@ -15,8 +15,8 @@ no design decisions to make.
 
 | Bucket name | Region | Versioning | Default encryption | Public access |
 |-------------|--------|------------|--------------------|---------------|
-| `dr-secrets-us-east-2-049629455384` | us-east-2 | **Enabled** | SSE-KMS → `alias/dr-secrets-us-east-2` | Block ALL |
-| `dr-secrets-us-west-2-049629455384` | us-west-2 | **Enabled** | SSE-KMS → `alias/dr-secrets-us-west-2` | Block ALL |
+| `dr-secrets-us-east-2-997819012307` | us-east-2 | **Enabled** | SSE-KMS → `alias/dr-secrets-us-east-2` | Block ALL |
+| `dr-secrets-us-west-2-997819012307` | us-west-2 | **Enabled** | SSE-KMS → `alias/dr-secrets-us-west-2` | Block ALL |
 
 Only the roles created in Steps 3 and 4 may access these buckets.
 
@@ -43,7 +43,7 @@ policy below — the `sts:ExternalId` value will be provided separately:
     "Action": "sts:AssumeRole",
     "Condition": { "StringEquals": { "sts:ExternalId": "<PROVIDED-SEPARATELY>" } } },
   { "Effect": "Allow",
-    "Principal": { "AWS": "arn:aws:iam::049629455384:role/dr-secrets-uc-role" },
+    "Principal": { "AWS": "arn:aws:iam::997819012307:role/dr-secrets-uc-role" },
     "Action": "sts:AssumeRole" } ] }
 ```
 
@@ -63,15 +63,15 @@ policy below — the `sts:ExternalId` value will be provided separately:
     "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:GetObjectVersion",
                "s3:ListBucket","s3:GetBucketLocation"],
     "Resource": [
-      "arn:aws:s3:::dr-secrets-us-east-2-049629455384",
-      "arn:aws:s3:::dr-secrets-us-east-2-049629455384/*",
-      "arn:aws:s3:::dr-secrets-us-west-2-049629455384",
-      "arn:aws:s3:::dr-secrets-us-west-2-049629455384/*" ] },
+      "arn:aws:s3:::dr-secrets-us-east-2-997819012307",
+      "arn:aws:s3:::dr-secrets-us-east-2-997819012307/*",
+      "arn:aws:s3:::dr-secrets-us-west-2-997819012307",
+      "arn:aws:s3:::dr-secrets-us-west-2-997819012307/*" ] },
   { "Sid": "KMS", "Effect": "Allow",
     "Action": ["kms:Encrypt","kms:Decrypt","kms:GenerateDataKey","kms:DescribeKey"],
     "Resource": [
-      "arn:aws:kms:us-east-2:049629455384:key/*",
-      "arn:aws:kms:us-west-2:049629455384:key/*" ],
+      "arn:aws:kms:us-east-2:997819012307:key/*",
+      "arn:aws:kms:us-west-2:997819012307:key/*" ],
     "Condition": { "StringEquals": { "kms:ResourceAliases": [
       "alias/dr-secrets-us-east-2","alias/dr-secrets-us-west-2" ] } } } ] }
 ```
@@ -93,15 +93,15 @@ policy below — the `sts:ExternalId` value will be provided separately:
     "Action": ["s3:GetReplicationConfiguration","s3:ListBucket",
                "s3:GetObjectVersionForReplication","s3:GetObjectVersionAcl","s3:GetObjectVersionTagging"],
     "Resource": [
-      "arn:aws:s3:::dr-secrets-us-east-2-049629455384","arn:aws:s3:::dr-secrets-us-east-2-049629455384/*",
-      "arn:aws:s3:::dr-secrets-us-west-2-049629455384","arn:aws:s3:::dr-secrets-us-west-2-049629455384/*" ] },
+      "arn:aws:s3:::dr-secrets-us-east-2-997819012307","arn:aws:s3:::dr-secrets-us-east-2-997819012307/*",
+      "arn:aws:s3:::dr-secrets-us-west-2-997819012307","arn:aws:s3:::dr-secrets-us-west-2-997819012307/*" ] },
   { "Sid": "DestWrite", "Effect": "Allow",
     "Action": ["s3:ReplicateObject","s3:ReplicateDelete","s3:ReplicateTags"],
     "Resource": [
-      "arn:aws:s3:::dr-secrets-us-east-2-049629455384/*","arn:aws:s3:::dr-secrets-us-west-2-049629455384/*" ] },
+      "arn:aws:s3:::dr-secrets-us-east-2-997819012307/*","arn:aws:s3:::dr-secrets-us-west-2-997819012307/*" ] },
   { "Sid": "KMS", "Effect": "Allow",
     "Action": ["kms:Decrypt","kms:Encrypt","kms:GenerateDataKey"],
-    "Resource": ["arn:aws:kms:us-east-2:049629455384:key/*","arn:aws:kms:us-west-2:049629455384:key/*"],
+    "Resource": ["arn:aws:kms:us-east-2:997819012307:key/*","arn:aws:kms:us-west-2:997819012307:key/*"],
     "Condition": { "StringEquals": { "kms:ResourceAliases": [
       "alias/dr-secrets-us-east-2","alias/dr-secrets-us-west-2" ] } } } ] }
 ```
@@ -111,8 +111,8 @@ policy below — the `sts:ExternalId` value will be provided separately:
 
 | Rule name | Source bucket | Destination bucket | Destination KMS key |
 |-----------|---------------|--------------------|---------------------|
-| `dr-secrets-crr-east-to-west` | `dr-secrets-us-east-2-049629455384` | `dr-secrets-us-west-2-049629455384` | `alias/dr-secrets-us-west-2` |
-| `dr-secrets-crr-west-to-east` | `dr-secrets-us-west-2-049629455384` | `dr-secrets-us-east-2-049629455384` | `alias/dr-secrets-us-east-2` |
+| `dr-secrets-crr-east-to-west` | `dr-secrets-us-east-2-997819012307` | `dr-secrets-us-west-2-997819012307` | `alias/dr-secrets-us-west-2` |
+| `dr-secrets-crr-west-to-east` | `dr-secrets-us-west-2-997819012307` | `dr-secrets-us-east-2-997819012307` | `alias/dr-secrets-us-east-2` |
 
 ---
 
