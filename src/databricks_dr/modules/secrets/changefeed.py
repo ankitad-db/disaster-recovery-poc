@@ -63,8 +63,8 @@ def detect_via_system_tables(
     actions = ", ".join(f"'{a}'" for a in MUTATION_ACTIONS)
     sql = (
         "SELECT action_name, "
-        "request_params.scope AS scope, "
-        "request_params.key AS secret_key "
+        "request_params['scope'] AS scope, "
+        "request_params['key'] AS secret_key "
         f"FROM {audit_table} "
         f"WHERE service_name = '{service_name}' "
         f"AND action_name IN ({actions}) "
