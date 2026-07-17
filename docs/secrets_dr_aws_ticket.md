@@ -2,12 +2,14 @@
 
 ## Summary
 Create the S3 + KMS + IAM + bidirectional CRR assets listed below. All names,
-regions, and policies are fully specified — please create exactly these. There are
-no design decisions to make.
+regions, and policies are fully specified 
 
-## Fixed facts
+## Details
 - **AWS account:** `997819012307`
 - **Regions:** `us-east-2` (primary), `us-west-2` (secondary)
+- **Databricks workspaces the roles are used from:**
+  - Primary (us-east-2): `fevm-fevm-ps-dr-us-east-2` — `https://fevm-fevm-ps-dr-us-east-2.cloud.databricks.com` (workspace id `7474660494970929`)
+  - Secondary (us-west-2): `fevm-krish-dr-fevm-us-west-2` — `https://fevm-krish-dr-fevm-us-west-2.cloud.databricks.com` (workspace id `7474658261824919`)
 
 ---
 
@@ -125,8 +127,3 @@ policy below — the `sts:ExternalId` value will be provided separately:
 - Both CRR rules are active and replicating the `secrets/` prefix bidirectionally
   with KMS re-encryption at the destination.
 
-## Notes for the assignee
-- The KMS **key ids** are outputs of Step 2; the IAM policies use `kms:ResourceAliases`
-  conditions so you never need to paste a key id.
-- The `sts:ExternalId` in Step 3a will be provided separately once available — leave
-  the placeholder until then.
