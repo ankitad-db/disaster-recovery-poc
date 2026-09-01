@@ -96,6 +96,8 @@ def run_import(
     local = cfg.workspaces[region_key]
     mode = cfg.reconcile.get("mode", "mirror")
     prune_scopes = bool(cfg.reconcile.get("prune_extra_scopes", False))
+    audit_table = cfg.audit_table_for(region_key)
+    inventory_table = cfg.inventory_table_for(region_key)
 
     if wc is None:
         from databricks.sdk import WorkspaceClient
@@ -149,7 +151,7 @@ def run_import(
     if not has_work:
         dur = time.time() - t0
         control.record_audit(
-            ex, cfg.audit_table, operation="IMPORT", status="SKIPPED", direction=direction,
+            ex, audit_table, operation="IMPORT", status="SKIPPED", direction=direction,
             item_count=0, bundle_id=bundle.get("bundle_id"), duration_sec=dur,
             detail=f"in sync (skipped={skipped})", actor=actor or cfg.service_principal,
         )
@@ -217,10 +219,10 @@ def run_import(
             except Exception as e:  # noqa: BLE001
                 _logger.debug("delete_scope %s: %s", scope, str(e)[:120])
 
-    control.upsert_inventory(ex, cfg.inventory_table, inv_updates)
+    control.upsert_inventory(ex, inventory_table, inv_updates)
     dur = time.time() - t0
     control.record_audit(
-        ex, cfg.audit_table, operation="IMPORT", status="SUCCESS", direction=direction,
+        ex, audit_table, operation="IMPORT", status="SUCCESS", direction=direction,
         item_count=added + updated, bundle_id=bundle.get("bundle_id"), duration_sec=dur,
         detail=f"added={added} updated={updated} deleted={deleted} skipped={skipped} "
                f"acls={len(acl_plan)} mode={mode}",

@@ -10,6 +10,36 @@ reusable procedure see [secrets_dr_runbook.md](secrets_dr_runbook.md); for archi
 
 ---
 
+## Test flow (what was executed)
+
+```mermaid
+flowchart TD
+    S1["1 · Create control tables<br/>EAST + WEST"] --> S2["2 · Seed 5 secrets in EAST<br/>2 scopes, 1 ACL"]
+    S2 --> S3["3 · EXPORT in EAST<br/>detect → get_secret → sha256<br/>KMS envelope-encrypt → full snapshot to S3"]
+    S3 --> S3b["3b · S3 CRR<br/>east bucket → west bucket"]
+    S3b --> S4["4 · IMPORT in WEST (destination-aware)<br/>read bundle + live state → diff → apply<br/>added=5, acls=1"]
+    S4 --> V1{"hashes<br/>east == west?"}
+    V1 -->|yes| S5["5 · Re-import (idempotency)<br/>in_sync · skipped=5"]
+    S5 --> S6["6 · Incremental: rotate + delete in EAST<br/>export → CRR → import<br/>updated=1 · deleted=1 · skipped=3"]
+    S6 --> S7["7 · Failback: change in WEST<br/>export WEST → CRR → import EAST<br/>updated=1 · api_token converges"]
+    S7 --> S8["8 · Audit tables (EXPORT / IMPORT rows)"]
+
+    S4 -. "blocker: KMS single-region key" .-> F1["Fix: migrate to KMS<br/>Multi-Region Key"]
+    F1 -. retry .-> S4
+    S3b -. "blocker: CRR on old key" .-> F2["Fix: repoint CRR role +<br/>ReplicaKmsKeyID to MRK"]
+    F2 -. retry .-> S3b
+
+    classDef ok fill:#e6fcf5,stroke:#0ca678,color:#000;
+    classDef fix fill:#fff4e6,stroke:#e8590c,color:#000;
+    class S1,S2,S3,S3b,S4,S5,S6,S7,S8 ok;
+    class F1,F2 fix;
+```
+
+Green = the steady-state flow; orange = the two blockers hit mid-test and the fixes applied
+before the run went fully green (Findings 1 & 2).
+
+---
+
 ## Environment tested
 
 | | Primary (active) | Secondary (passive) |
@@ -42,7 +72,7 @@ so mirror-mode never touches unrelated sandbox secrets.
 | 5 | **Idempotency** — re-import with no changes | ✅ | `in_sync=True, skipped=5` (nothing re-decrypted/rewritten) |
 | 6 | **Incremental** — rotate `db_password` + delete `service_url`, export, import | ✅ | export `changed=4, deleted=1`; import **`updated=1, deleted=1, skipped=3`**; hashes match |
 | 7 | **Failback** — change `api_token` in WEST, export WEST → CRR → import into EAST (roles swapped) | ✅ | import `updated=1, skipped=3`; **east `api_token` == west `api_token`** |
-| 8 | Audit tables | ✅ east / ⚠️ west | east records EXPORT×4 + IMPORT (failback); west blocked — Finding 7 |
+| 8 | Audit tables (both workspaces) | ✅ | east records EXPORT + IMPORT (failback); **west** records IMPORT×3 + EXPORT (failback source) once its control catalog was set (Finding 7, resolved) |
 
 ### Step 6 detail — the diff logic (the important one)
 
@@ -73,6 +103,18 @@ IMPORT  SUCCESS  us-west-2->us-east-2  n=1  added=0 updated=1 deleted=0 skipped=
 ```
 `dr_secrets_inventory` (east) ends with `service_url = DELETED`, the other four `IN_SYNC` —
 matching the live workspace state.
+
+### Audit trail (west control tables — after Finding 7 fix)
+
+Once west's control tables were placed in a catalog with valid managed storage (its default
+catalog), the passive side records its own history too:
+
+```
+IMPORT  SUCCESS  us-east-2->us-west-2  n=5  added=1 updated=4 deleted=0 skipped=0   (failover)
+IMPORT  SKIPPED  us-east-2->us-west-2  n=0  in sync (skipped=5)                     (idempotency)
+IMPORT  SUCCESS  us-east-2->us-west-2  n=1  updated=1 deleted=1 skipped=3           (incremental)
+EXPORT  SUCCESS  us-west-2->us-east-2  n=4  snapshot items=4 deleted=0 scopes=2     (failback source)
+```
 
 ---
 
@@ -122,17 +164,16 @@ had actually failed. **Fix:** `SqlExecutor.execute` now inspects the status and 
 *Lesson: the control plane was failing silently; only the pure-SDK data path was truly
 verified until this was fixed.*
 
-**Finding 7 — the WEST metastore can't host the control tables yet.** *(environment gap)*
-With Finding 6 fixed, creating a managed Delta table in a fresh west `dr_poc` catalog fails:
+**Finding 7 — the WEST metastore can't host a fresh `dr_poc` catalog.** *(environment gap → resolved)*
+With Finding 6 fixed, creating a managed Delta table in a fresh west `dr_poc` catalog failed:
 `EXTERNAL_LOCATION_DOES_NOT_EXIST … ankita-dr-wp-us-west-2-ext-s3-…/dr_managed/… does not
-exist`. The catalog/schema (metadata) create fine, but the metastore's **managed storage
-location doesn't exist**, so no table can be created. **This does not affect the DR data path**
-(secret replication is pure SDK and is fully verified); it only blocks the audit/inventory
-tables on the passive side. **Options:** (a) point `control.catalog` at an existing west catalog
-that has valid managed storage, or (b) create the west `dr_poc` catalog with an explicit
-`MANAGED LOCATION` on a real external location. Since the passive side runs no compute in
-steady state, west audit only matters post-failover, when the promoted workspace should already
-have working storage.
+exist`. The catalog/schema (metadata) created fine, but that catalog had **no managed storage
+location**, so no table could be created. This never affected the DR data path (secret
+replication is pure SDK and was fully verified) — only the audit/inventory tables on the
+passive side. **Resolved:** added a **per-workspace control catalog** (`control.catalog_by_workspace`)
+and pointed west at its **default catalog** (which has valid managed storage). A follow-up run
+confirmed west's control tables create and record IMPORT/EXPORT history. *(Alternative: create
+`dr_poc` in west with an explicit `MANAGED LOCATION` on a real external location.)*
 
 ---
 
@@ -143,6 +184,9 @@ have working storage.
 - **CRR** role policy + `ReplicaKmsKeyID` updated (live) to the MRK.
 - **`SqlExecutor.execute` now raises on failed statements** (`src/databricks_dr/common/sql.py`)
   — control-plane failures are loud instead of silent (Finding 6).
+- **Per-workspace control catalog** (`control.catalog_by_workspace` in config; `export`/`import`
+  resolve the audit/inventory tables per workspace). West points at its default catalog so its
+  control plane works (Finding 7); east keeps `dr_poc`.
 - Test harness `scripts/e2e_secrets_dr_test.py` added (the exact steps above, re-runnable);
   it waits for the `_latest` pointer to replicate before importing (Finding 3).
 - `config/secrets_dr_config.yaml`: real workspace ids filled in.
@@ -154,5 +198,5 @@ have working storage.
 2. Run the same flow **from Databricks jobs** (Asset Bundle) as the DR service principal,
    using the `dr-secrets-uc-role` / instance profile, to validate the on-cluster identity +
    KMS grants end-to-end (this run used a local admin identity).
-3. Wire the control-table **audit/inventory** into a health check + alert (the tables are
-   populated; add `v_dr_secrets_failures` monitoring).
+3. Wire the control-table **audit/inventory** into a health check + alert (both east and west
+   tables now populate; add `v_dr_secrets_failures` monitoring).

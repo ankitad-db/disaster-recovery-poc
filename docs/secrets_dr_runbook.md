@@ -140,7 +140,10 @@ under `workspaces.*.workspace_id` — the export auto-derives it if left blank.)
 ### 4.3 Control tables — run in BOTH workspaces
 
 Import the repo as a Databricks Git folder in each workspace, then run
-`notebooks/secrets/00_setup_secrets.py` in **EAST** and **WEST**.
+`notebooks/secrets/00_setup_secrets.py` in **EAST** and **WEST**. If a workspace's metastore
+has no managed storage for a fresh `dr_poc` catalog, set the notebook's **`catalog`** widget
+to a catalog that already has managed storage (e.g. that workspace's default catalog) and add
+the same under `control.catalog_by_workspace` in the config (west is configured this way).
 
 **✅ Check** (either workspace):
 ```sql
@@ -328,7 +331,7 @@ checks as Steps 2–4.
 | KMS `AccessDenied` / *"resource does not exist in this Region"* on decrypt | KMS key is **not** multi-region (data key wrapped by a regional key that the other region can't decrypt) | Use a **Multi-Region Key** (the provisioner creates one). Both aliases must resolve to the same MRK. |
 | KMS `AccessDenied` on encrypt/decrypt | Key policy / role missing KMS grant | Confirm the running identity can `GenerateDataKey`/`Decrypt` on the region's `alias/dr-secrets-*`. |
 | CRR stuck at `ReplicationStatus=FAILED` | `dr-secrets-crr-role` / rule `ReplicaKmsKeyID` don't reference the (MR) key | Grant the CRR role KMS on the MRK and set each rule's `ReplicaKmsKeyID` to it (Finding 2). |
-| Control-table setup "succeeds" but tables are empty / `EXTERNAL_LOCATION_DOES_NOT_EXIST` | The target metastore has no valid managed storage for the catalog | Point `control.catalog` at a catalog with valid managed storage, or create `dr_poc` with an explicit `MANAGED LOCATION` (Finding 7). The DR data path is unaffected. |
+| Control-table setup "succeeds" but tables are empty / `EXTERNAL_LOCATION_DOES_NOT_EXIST` | The target metastore has no valid managed storage for a fresh catalog | Set `control.catalog_by_workspace.<workspace>` to a catalog that has managed storage (e.g. the workspace default), or create `dr_poc` with an explicit `MANAGED LOCATION` (Finding 7). The DR data path is unaffected. |
 | Bundle not in WEST bucket | CRR lag or objects predate the rule | Wait; check `head-object … ReplicationStatus`. CRR only replicates objects written **after** the rule was enabled. |
 | `decrypt` fails with an auth/tag error | EncryptionContext mismatch | `{scope,key}` must match encrypt-time exactly; don't hand-edit bundles or move ciphertext between keys. |
 | Export writes nothing, says "no changes" | Nothing changed since last watermark | Expected. Force a full snapshot with `--full` / `full=true`. |

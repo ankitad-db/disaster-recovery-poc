@@ -7,7 +7,11 @@
 # MAGIC already exist (from the shared setup); creates the schema if missing.
 
 # COMMAND ----------
-CATALOG = "dr_poc"
+# Catalog for the control tables. Default `dr_poc`; on a workspace whose metastore has no
+# managed storage for a fresh catalog, set this to a catalog that already has managed storage
+# (e.g. the workspace default catalog) — matching `control.catalog_by_workspace` in the config.
+dbutils.widgets.text("catalog", "dr_poc")  # noqa: F821
+CATALOG = dbutils.widgets.get("catalog")   # noqa: F821
 SCHEMA = "dr_control"
 
 STATEMENTS = [

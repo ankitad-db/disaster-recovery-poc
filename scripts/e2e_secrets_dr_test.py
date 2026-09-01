@@ -84,16 +84,24 @@ def wait_warehouse(wc, wid, label):
     return False
 
 
-def setup_control(ex, label):
-    """Create dr_poc.dr_control control tables. Returns True if the backend works."""
-    ddl = [
-        "CREATE CATALOG IF NOT EXISTS dr_poc",
-        "CREATE SCHEMA IF NOT EXISTS dr_poc.dr_control COMMENT 'DR control plane'",
-        """CREATE TABLE IF NOT EXISTS dr_poc.dr_control.dr_secrets_inventory (
+def setup_control(ex, region_key, cfg, label):
+    """Create the control tables in this workspace's control catalog. Returns True on success.
+
+    The catalog comes from cfg.control_catalog_for(region_key): the framework's own
+    `dr_poc` (created here) or a per-workspace override catalog that already exists.
+    """
+    cat = cfg.control_catalog_for(region_key)
+    sch = cfg.control["schema"]
+    ddl = []
+    if cat == cfg.control["catalog"]:            # our own catalog -> create it
+        ddl.append(f"CREATE CATALOG IF NOT EXISTS {cat}")
+    ddl += [
+        f"CREATE SCHEMA IF NOT EXISTS {cat}.{sch} COMMENT 'DR control plane'",
+        f"""CREATE TABLE IF NOT EXISTS {cat}.{sch}.dr_secrets_inventory (
             scope STRING NOT NULL, secret_key STRING NOT NULL, value_hash STRING,
             acl_signature STRING, source_last_updated TIMESTAMP, last_synced_at TIMESTAMP,
             bundle_id STRING, status STRING, updated_at TIMESTAMP) USING DELTA""",
-        """CREATE TABLE IF NOT EXISTS dr_poc.dr_control.dr_secrets_audit (
+        f"""CREATE TABLE IF NOT EXISTS {cat}.{sch}.dr_secrets_audit (
             audit_id STRING NOT NULL, event_time TIMESTAMP, operation STRING, direction STRING,
             scope STRING, item_count INT, status STRING, bundle_id STRING, duration_sec DOUBLE,
             detail STRING, actor STRING) USING DELTA""",
@@ -101,21 +109,21 @@ def setup_control(ex, label):
     try:
         for s in ddl:
             ex.execute(s)
-        print(f"  [{label}] control tables ready")
+        print(f"  [{label}] control tables ready in {cat}.{sch}")
         return True
     except Exception as e:  # noqa: BLE001
         print(f"  [{label}] control-table setup FAILED (auditing disabled): {str(e)[:160]}")
         return False
 
 
-def dump_audit(ex, label):
+def dump_audit(ex, table, label):
     if not ex.available:
         print(f"  [{label}] (no audit backend)")
         return
     try:
         res = ex.execute(
-            "SELECT operation, status, direction, item_count, bundle_id, detail "
-            "FROM dr_poc.dr_control.dr_secrets_audit ORDER BY event_time"
+            f"SELECT operation, status, direction, item_count, bundle_id, detail "
+            f"FROM {table} ORDER BY event_time"
         )
         cols = ["operation", "status", "direction", "item_count", "bundle_id", "detail"]
         for r in rows(res, cols):
@@ -140,8 +148,8 @@ def main() -> int:
     ex_west = SqlExecutor(workspace_client=west, warehouse_id=WEST_WH, wait_timeout="50s")
 
     hr("1. CONTROL TABLES (both workspaces)")
-    audit_east = setup_control(ex_east, "east")
-    audit_west = setup_control(ex_west, "west")
+    audit_east = setup_control(ex_east, "primary", cfg, "east")
+    audit_west = setup_control(ex_west, "secondary", cfg, "west")
     if not audit_east:
         ex_east = SqlExecutor(workspace_client=east)  # no-op backend
     if not audit_west:
@@ -226,6 +234,12 @@ def main() -> int:
         fb["workspaces"]["secondary"], fb["workspaces"]["primary"])
     fb["storage"]["primary_bucket"], fb["storage"]["secondary_bucket"] = (
         fb["storage"]["secondary_bucket"], fb["storage"]["primary_bucket"])
+    # Swap the per-workspace control-catalog override too, so failback audit lands in
+    # the right catalog for each (now-swapped) role.
+    cbw = (fb.get("control") or {}).get("catalog_by_workspace") or {}
+    fb["control"]["catalog_by_workspace"] = {
+        k: v for k, v in {"primary": cbw.get("secondary"), "secondary": cbw.get("primary")}.items() if v
+    }
     from databricks_dr.modules.secrets.config import SecretsConfig
     cfg_fb = SecretsConfig(raw=fb, path=cfg.path).validate()
     r = exportmod.run_export(cfg_fb, wc=west, ex=ex_west, force_full=True)
@@ -240,8 +254,8 @@ def main() -> int:
           f"{src3.get(('dr_app_prod','api_token')) == dst3.get(('dr_app_prod','api_token'))}")
 
     hr("8. AUDIT TABLES")
-    dump_audit(ex_east, "east")
-    dump_audit(ex_west, "west")
+    dump_audit(ex_east, cfg.audit_table_for("primary"), "east")
+    dump_audit(ex_west, cfg.audit_table_for("secondary"), "west")
 
     hr("DONE")
     return 0
