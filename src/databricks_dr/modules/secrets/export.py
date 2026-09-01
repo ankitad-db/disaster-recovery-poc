@@ -1,9 +1,15 @@
 """Secrets EXPORT — runs in the PRIMARY workspace.
 
-Detects changed secrets (system-tables-first), reads their values with the
-``get-secret`` API, envelope-encrypts them, captures the scope ACL shape, and
-writes a bundle to the primary-region S3 bucket. S3 CRR then mirrors the bundle to
-the secondary region. Bookkeeping goes to the Delta control tables.
+Detects change (system-tables-first, with a full state-diff recon safety net). When
+anything changed, it re-reads the *full* in-scope secret state with the ``get-secret``
+API, envelope-encrypts each value, captures the scope ACLs, and writes a **complete
+desired-state snapshot** bundle to the primary-region S3 bucket. S3 CRR then mirrors
+the bundle to the secondary region. Bookkeeping goes to the Delta control tables.
+
+The bundle is a full snapshot (not a delta) on purpose: ``_latest`` is therefore always
+a self-contained recovery point, so a cold secondary can be rebuilt from a single bundle
+on the first failover, and the destination-aware import (see ``import_.py``) can compute
+a complete diff — including pruning secrets that no longer exist in the primary.
 
 SDK-only: no ``dbutils``. Runs in a notebook, a job, or locally with a profile.
 """
@@ -53,10 +59,20 @@ def run_export(
     if ex is None:
         ex = SqlExecutor(spark=spark, workspace_client=wc, warehouse_id=cfg.warehouse_id or None)
 
+    # Scope the audit scan to this workspace; auto-derive the id if the config left it blank.
+    workspace_id = primary.workspace_id
+    if not workspace_id:
+        try:
+            workspace_id = str(wc.get_workspace_id())
+        except Exception as e:  # noqa: BLE001
+            _logger.warning("could not auto-resolve primary workspace_id: %s", str(e)[:120])
+
     inv = control.load_inventory(ex, cfg.inventory_table)
     live = changefeed.live_state(wc, cfg.include, cfg.exclude)
 
-    # ---- detect changes (system-tables-first, recon safety net) --------------
+    # ---- detect change (system-tables-first, recon safety net) ---------------
+    # Detection decides *whether* to cut a new snapshot and records what moved (for
+    # RPO/audit). The snapshot itself is always the full in-scope state.
     if force_full or not cfg.use_system_tables:
         cs = changefeed.detect_via_state_diff(live, inv)
     else:
@@ -64,7 +80,7 @@ def run_export(
         cs = changefeed.detect_via_system_tables(
             ex, audit_table=cfg.audit_system_table,
             service_name=cfg.detection.get("service_name", "secrets"),
-            workspace_id=primary.workspace_id, since_iso=since,
+            workspace_id=workspace_id, since_iso=since,
             lookback_hours=int(cfg.detection.get("lookback_hours", 48)),
         )
         if cfg.detection.get("full_recon", True):
@@ -73,63 +89,74 @@ def run_export(
             cs.deleted |= recon.deleted
             cs.scopes_touched |= recon.scopes_touched
 
-    # ---- read values for changed keys, capture ACLs --------------------------
+    live_pairs = {(s, k) for s, info in live.items() for k in info["keys"]}
+    inv_deleted = [
+        (s, k) for (s, k), r in inv.items()
+        if (s, k) not in live_pairs and r.get("status") != "DELETED"
+    ]
+
+    # Idempotent idle-skip: nothing changed and nothing dropped -> no new snapshot.
+    if not force_full and not cs.changed and not cs.deleted and not inv_deleted:
+        dur = time.time() - t0
+        control.record_audit(
+            ex, cfg.audit_table, operation="EXPORT", status="SKIPPED", direction=direction,
+            item_count=0, duration_sec=dur, detail="no changes", actor=actor or cfg.service_principal,
+        )
+        _logger.info("No secret changes detected; nothing to export.")
+        return {"bundle_id": None, "exported": 0, "deleted": 0, "scopes": [],
+                "skipped": True, "duration_sec": round(dur, 2)}
+
+    # ---- read the FULL in-scope state, envelope-encrypt each value -----------
     use_cse = cfg.storage.get("client_side_encryption", True)
     kms = crypto.kms_client(primary.region) if use_cse else None
     kms_key = cfg.kms_key_for(primary.region)
 
+    bundle_id = _bundle_id()
     items: List[Dict[str, Any]] = []
     inv_updates: List[Dict[str, Any]] = []
-    scopes_in_play = {s for s, _ in cs.changed} | cs.scopes_touched
-    acls_out: Dict[str, List] = {
-        s: live.get(s, {}).get("acls", []) for s in scopes_in_play if s in live
-    }
+    acls_out: Dict[str, List] = {s: info.get("acls", []) for s, info in live.items()}
 
-    for scope, key in sorted(cs.changed):
-        try:
-            resp = wc.secrets.get_secret(scope=scope, key=key)
-            plaintext = base64.b64decode(resp.value)
-        except Exception as e:  # noqa: BLE001
-            _logger.error("get-secret failed for %s/%s: %s", scope, key, str(e)[:200])
-            raise
-        blob = (crypto.encrypt_value(kms, kms_key, plaintext, {"scope": scope, "key": key})
-                if use_cse else crypto.wrap_plain(plaintext))
-        items.append({"scope": scope, "key": key, "value": blob})
-        inv_updates.append({
-            "scope": scope, "secret_key": key,
-            "value_hash": _sha256(plaintext),
-            "acl_signature": _acl_signature(acls_out.get(scope, [])),
-            "source_last_updated": live.get(scope, {}).get("keys", {}).get(key),
-            "bundle_id": None, "status": "IN_SYNC",
-        })
+    for scope in sorted(live):
+        for key in sorted(live[scope]["keys"]):
+            try:
+                resp = wc.secrets.get_secret(scope=scope, key=key)
+                plaintext = base64.b64decode(resp.value)
+            except Exception as e:  # noqa: BLE001
+                _logger.error("get-secret failed for %s/%s: %s", scope, key, str(e)[:200])
+                raise
+            value_hash = _sha256(plaintext)
+            blob = (crypto.encrypt_value(kms, kms_key, plaintext, {"scope": scope, "key": key})
+                    if use_cse else crypto.wrap_plain(plaintext))
+            items.append({"scope": scope, "key": key, "value": blob, "value_hash": value_hash})
+            inv_updates.append({
+                "scope": scope, "secret_key": key,
+                "value_hash": value_hash,
+                "acl_signature": _acl_signature(acls_out.get(scope, [])),
+                "source_last_updated": live[scope]["keys"].get(key),
+                "bundle_id": bundle_id, "status": "IN_SYNC",
+            })
 
-    deletes = [{"scope": s, "key": k} for s, k in sorted(cs.deleted)]
-
-    bundle_id = _bundle_id()
-    for u in inv_updates:
-        u["bundle_id"] = bundle_id
+    deletes = [{"scope": s, "key": k} for s, k in sorted(set(cs.deleted) | set(inv_deleted))]
 
     bundle = {
         "bundle_id": bundle_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "direction": direction,
         "source_region": primary.region,
+        "snapshot": "full",
         "encryption": "AES256-GCM" if use_cse else "PLAIN",
         "items": items,
         "acls": {s: [{"principal": p, "permission": perm} for p, perm in a] for s, a in acls_out.items()},
         "deletes": deletes,
     }
 
-    # ---- write to the primary-region bucket (CRR mirrors it to secondary) ----
-    if items or deletes:
-        s3 = store.s3_client(primary.region)
-        store.put_bundle(
-            s3, cfg.bucket_for(primary.region), cfg.storage["prefix"], bundle_id, bundle,
-            kms_key_id=kms_key or None,
-            latest_pointer=cfg.storage.get("latest_pointer", "_latest.txt"),
-        )
-    else:
-        _logger.info("No secret changes detected; nothing to export.")
+    # ---- write the snapshot to the primary bucket (CRR mirrors to secondary) -
+    s3 = store.s3_client(primary.region)
+    store.put_bundle(
+        s3, cfg.bucket_for(primary.region), cfg.storage["prefix"], bundle_id, bundle,
+        kms_key_id=kms_key or None,
+        latest_pointer=cfg.storage.get("latest_pointer", "_latest.txt"),
+    )
 
     # ---- persist inventory + audit ------------------------------------------
     control.upsert_inventory(ex, cfg.inventory_table, inv_updates)
@@ -138,15 +165,16 @@ def run_export(
             "scope": d["scope"], "secret_key": d["key"], "status": "DELETED", "bundle_id": bundle_id,
         }])
     dur = time.time() - t0
+    scopes_in_play = sorted(live)
     control.record_audit(
         ex, cfg.audit_table, operation="EXPORT", status="SUCCESS", direction=direction,
         item_count=len(items), bundle_id=bundle_id, duration_sec=dur,
-        detail=f"changed={len(items)} deleted={len(deletes)} scopes={len(scopes_in_play)}",
+        detail=f"snapshot items={len(items)} deleted={len(deletes)} scopes={len(scopes_in_play)}",
         actor=actor or cfg.service_principal,
     )
     summary = {
         "bundle_id": bundle_id, "exported": len(items), "deleted": len(deletes),
-        "scopes": sorted(scopes_in_play), "duration_sec": round(dur, 2),
+        "scopes": scopes_in_play, "duration_sec": round(dur, 2),
     }
     _logger.info("Secrets export complete: %s", summary)
     return summary

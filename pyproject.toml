@@ -3,37 +3,29 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "databricks-dr"
+name = "databricks-secrets-dr"
 version = "0.1.0"
-description = "Disaster Recovery framework for unsupported Databricks resources. First module: Unity Catalog models."
+description = "Disaster recovery for Databricks workspace secrets (scopes, values, ACLs) — KMS envelope encryption + S3 cross-region replication."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Proprietary" }
 authors = [{ name = "Ankita Darekar" }]
 dependencies = [
-    "mlflow>=2.16",
     "databricks-sdk>=0.30",
     "PyYAML>=6.0",
-    "click>=8.1",
-]
-
-[project.optional-dependencies]
-# Seeding the POC model trains a small sklearn model (present on ML runtimes).
-seed = [
-    "scikit-learn>=1.3",
-]
-# Workspace-secrets DR module: S3 bundle store + KMS envelope encryption.
-secrets = [
     "boto3>=1.28",
     "cryptography>=41",
 ]
+
+[project.optional-dependencies]
 dev = [
     "pytest>=7",
     "ruff>=0.4",
 ]
 
 [project.scripts]
-databricks-dr = "databricks_dr.cli:main"
+# python -m databricks_dr.modules.secrets.runner export | import
+databricks-secrets-dr = "databricks_dr.modules.secrets.runner:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
