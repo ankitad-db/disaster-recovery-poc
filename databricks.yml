@@ -1,20 +1,19 @@
 # Databricks Asset Bundle — Workspace Secrets DR.
 #
-# Deploys the code + jobs to a target workspace. Steady-state EXPORT runs in the
-# PRIMARY (east); the on-failover IMPORT runs in the PROMOTED workspace (west).
-# Hosts match config/secrets_dr_config.yaml.
+# Direct cross-workspace replication: a scheduled REPLICATE job runs in the ACTIVE
+# (primary/east) workspace and pushes the delta into the secondary. Hosts match
+# config/secrets_dr_config.yaml.
 #
 #   databricks bundle validate -t east
-#   databricks bundle deploy   -t east        # primary (us-east-2): scheduled export
-#   databricks bundle deploy   -t west        # secondary (us-west-2): failover import job
+#   databricks bundle deploy   -t east        # primary (us-east-2): scheduled replicate
 #
-# Go live (unpause the export schedule) once a baseline export has been verified:
-#   databricks bundle deploy -t east --var export_pause_status=UNPAUSED
+# Go live (unpause the schedule) once a manual run has been verified:
+#   databricks bundle deploy -t east --var replicate_pause_status=UNPAUSED
 #
 # Run on demand:
-#   databricks bundle run dr_secrets_export           -t east
-#   databricks bundle run dr_secrets_failover_import  -t west
+#   databricks bundle run dr_secrets_replicate -t east
 #
+# On failover, run in the promoted workspace with direction=failback.
 # Each target maps to a CLI profile from `databricks auth login ... --profile`.
 
 bundle:
@@ -33,18 +32,18 @@ sync:
     - requirements.txt
 
 variables:
-  export_schedule_cron:
-    description: Quartz cron for the scheduled export in the primary. Tune to your RPO.
+  replicate_schedule_cron:
+    description: Quartz cron for the scheduled replicate in the primary. Tune to your RPO.
     default: "0 0/15 * * * ?"   # every 15 minutes
-  export_pause_status:
-    description: PAUSED|UNPAUSED for the export schedule. Set UNPAUSED to go live.
+  replicate_pause_status:
+    description: PAUSED|UNPAUSED for the replicate schedule. Set UNPAUSED to go live.
     default: "PAUSED"
   alert_email:
     description: Address for job-failure notifications.
     default: ankita.darekar@databricks.com
 
-# Primary (east) is the default day-to-day target: it runs the scheduled export.
-# Secondary (west) hosts the failover import job (triggered on promotion).
+# Primary (east) is the default day-to-day target: it runs the scheduled replicate.
+# On failover, deploy/run in the promoted workspace with direction=failback.
 targets:
   east:
     default: true
