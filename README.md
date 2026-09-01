@@ -100,5 +100,7 @@ workspaces (host/profile/region), which `scopes` to protect, `detection` strateg
 
 ## Status
 
-POC. AWS assets and the export/import flow are implemented; see the runbook for the
-current test procedure.
+POC — **verified end-to-end on 2026-09-01**: replicate east→west, incremental diff-and-apply
+(rotate + delete), and failback west→east all passed against the live sandbox workspaces +
+real S3/KMS/CRR. See the test report ([docs/secrets_dr_test_report.md](docs/secrets_dr_test_report.md))
+for the run log, observations, and findings (incl. the KMS Multi-Region-Key requirement).

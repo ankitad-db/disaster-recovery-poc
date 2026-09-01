@@ -65,13 +65,25 @@ class SqlExecutor:
         return self.spark is not None or (self.wc is not None and bool(self.warehouse_id))
 
     def execute(self, sql: str):
-        """Execute ``sql`` on whichever backend is configured; return its raw result."""
+        """Execute ``sql`` on whichever backend is configured; return its raw result.
+
+        On the SDK (warehouse) path a failed statement comes back as a ``FAILED``
+        ``StatementResponse`` rather than an exception, so we inspect the status and
+        raise — otherwise control-plane writes/DDL would silently no-op (and callers
+        that read the result would just see empty data).
+        """
         if self.spark is not None:
             return self.spark.sql(sql)
         if self.wc is not None and self.warehouse_id:
-            return self.wc.statement_execution.execute_statement(
+            resp = self.wc.statement_execution.execute_statement(
                 warehouse_id=self.warehouse_id, statement=sql, wait_timeout=self.wait_timeout
             )
+            status = getattr(resp, "status", None)
+            state = str(getattr(status, "state", "") or "")
+            if state.endswith(("FAILED", "CANCELED", "CLOSED")):
+                err = getattr(getattr(status, "error", None), "message", None) or state
+                raise RuntimeError(f"SQL statement {state}: {err}\nSQL: {sql[:500]}")
+            return resp
         _logger.warning("No spark/warehouse configured; SQL not executed:\n%s", sql)
         return None
 

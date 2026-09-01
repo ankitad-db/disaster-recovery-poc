@@ -29,23 +29,42 @@ UC_EXTERNAL_ID="${UC_EXTERNAL_ID:-PLACEHOLDER-UPDATE-AFTER-STORAGE-CREDENTIAL}"
 log() { printf '\n=== %s ===\n' "$*"; }
 
 # ---------------------------------------------------------------------------
-# KMS: create a CMK + alias in a region if the alias doesn't already resolve.
-# Echoes the key ARN.
+# KMS: a single MULTI-REGION key (primary in EAST, replica in WEST), aliased in
+# both regions. A multi-region key is REQUIRED here: secret values are envelope-
+# encrypted with a data key wrapped by this CMK, and the promoted secondary must
+# be able to decrypt that data key LOCALLY (KMS keys are regional; a plain regional
+# key minted in east cannot be decrypted in west — and in a real east outage it
+# would be unreachable). Echoes "<east_arn> <west_arn>" (same key id, per-region ARNs).
 # ---------------------------------------------------------------------------
-ensure_kms() {
-  local region="$1" alias="$2"
-  local arn
-  if arn=$(aws kms describe-key --region "$region" --key-id "$alias" \
-              --query KeyMetadata.Arn --output text 2>/dev/null); then
-    echo "$arn"; return 0
+ensure_mrk() {
+  local east_arn west_arn key_id
+  if east_arn=$(aws kms describe-key --region "$EAST" --key-id "$ALIAS_EAST" \
+                  --query KeyMetadata.Arn --output text 2>/dev/null); then
+    key_id=$(aws kms describe-key --region "$EAST" --key-id "$ALIAS_EAST" \
+               --query KeyMetadata.KeyId --output text)
+  else
+    key_id=$(aws kms create-key --region "$EAST" --multi-region \
+               --description "Workspace Secrets DR (multi-region)" \
+               --tags TagKey=project,TagValue=secrets-dr \
+               --query KeyMetadata.KeyId --output text)
+    aws kms create-alias --region "$EAST" --alias-name "$ALIAS_EAST" --target-key-id "$key_id"
+    east_arn=$(aws kms describe-key --region "$EAST" --key-id "$key_id" \
+                 --query KeyMetadata.Arn --output text)
   fi
-  local key_id
-  key_id=$(aws kms create-key --region "$region" \
-             --description "Workspace Secrets DR ($region)" \
-             --tags TagKey=project,TagValue=secrets-dr \
-             --query KeyMetadata.KeyId --output text)
-  aws kms create-alias --region "$region" --alias-name "$alias" --target-key-id "$key_id"
-  aws kms describe-key --region "$region" --key-id "$key_id" --query KeyMetadata.Arn --output text
+  # Replicate to WEST (same key id) and alias it there.
+  if ! west_arn=$(aws kms describe-key --region "$WEST" --key-id "$ALIAS_WEST" \
+                    --query KeyMetadata.Arn --output text 2>/dev/null); then
+    aws kms replicate-key --key-id "$key_id" --replica-region "$WEST" --region "$EAST" >/dev/null 2>&1 || true
+    local i
+    for i in $(seq 1 12); do
+      west_arn=$(aws kms describe-key --region "$WEST" --key-id "$key_id" \
+                   --query KeyMetadata.Arn --output text 2>/dev/null) && break
+      sleep 5
+    done
+    aws kms create-alias --region "$WEST" --alias-name "$ALIAS_WEST" --target-key-id "$key_id" 2>/dev/null \
+      || aws kms update-alias --region "$WEST" --alias-name "$ALIAS_WEST" --target-key-id "$key_id"
+  fi
+  echo "$east_arn $west_arn"
 }
 
 # ---------------------------------------------------------------------------
@@ -66,11 +85,12 @@ main() {
   trap 'rm -rf "${TMP:-}"' EXIT
   log "Account $ACCOUNT_ID | east=$EAST west=$WEST"
 
-  # ---- KMS keys first (needed for bucket encryption + policies) ----
-  log "KMS keys"
+  # ---- KMS multi-region key first (needed for bucket encryption + policies) ----
+  log "KMS multi-region key"
   local KMS_EAST_ARN KMS_WEST_ARN
-  KMS_EAST_ARN=$(ensure_kms "$EAST" "$ALIAS_EAST"); echo "east key: $KMS_EAST_ARN"
-  KMS_WEST_ARN=$(ensure_kms "$WEST" "$ALIAS_WEST"); echo "west key: $KMS_WEST_ARN"
+  read -r KMS_EAST_ARN KMS_WEST_ARN < <(ensure_mrk)
+  echo "east (primary) key: $KMS_EAST_ARN"
+  echo "west (replica) key: $KMS_WEST_ARN"
 
   # ---- IAM roles ----
   log "IAM roles"
