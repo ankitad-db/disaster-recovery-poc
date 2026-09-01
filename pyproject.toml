@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "databricks-secrets-dr"
 version = "0.1.0"
-description = "Disaster recovery for Databricks workspace secrets (scopes, values, ACLs) — KMS envelope encryption + S3 cross-region replication."
+description = "Disaster recovery for Databricks workspace secrets (scopes, values, ACLs) — direct cross-workspace replication over the Secrets API."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Proprietary" }
@@ -13,8 +13,6 @@ authors = [{ name = "Ankita Darekar" }]
 dependencies = [
     "databricks-sdk>=0.30",
     "PyYAML>=6.0",
-    "boto3>=1.28",
-    "cryptography>=41",
 ]
 
 [project.optional-dependencies]

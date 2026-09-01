@@ -1,12 +1,18 @@
 # Workspace Secrets DR — Test Report (live end-to-end)
 
-**Date:** 2026-09-01 · **Executed by:** automated driver `scripts/e2e_secrets_dr_test.py`
-**Result:** ✅ PASS — replicate PRIMARY→SECONDARY, incremental diff-and-apply, and failback
-all verified against the live sandbox workspaces + real S3/KMS/CRR assets.
+**Date:** 2026-09-02 · **Executed by:** `scripts/e2e_secrets_dr_test.py`
+**Result:** ✅ PASS — **direct cross-workspace replication** (no S3/CRR/KMS): replicate
+primary→secondary, idempotent re-run, incremental diff-and-apply, and failback
+secondary→primary all verified against the live sandbox workspaces.
 
-This is the actual runbook that was followed, with observations and findings. For the
-reusable procedure see [secrets_dr_runbook.md](secrets_dr_runbook.md); for architecture,
-[secrets_dr_architecture.excalidraw](secrets_dr_architecture.excalidraw).
+This is the actual runbook that was followed, with observations and findings. Reusable
+procedure: [secrets_dr_runbook.md](secrets_dr_runbook.md).
+
+> **Design note:** an earlier variant (envelope-encrypted bundle on S3 + bidirectional CRR +
+> KMS Multi-Region Key) was also built and tested green, then **simplified to direct
+> replication** by decision — no object storage, no AWS. The S3/KMS/CRR code and provisioner
+> were removed. Findings specific to that variant (KMS multi-region requirement, CRR KMS
+> re-config, `_latest` pointer race) no longer apply; the ones that carry over are noted below.
 
 ---
 
@@ -14,29 +20,20 @@ reusable procedure see [secrets_dr_runbook.md](secrets_dr_runbook.md); for archi
 
 ```mermaid
 flowchart TD
-    S1["1 · Create control tables<br/>EAST + WEST"] --> S2["2 · Seed 5 secrets in EAST<br/>2 scopes, 1 ACL"]
-    S2 --> S3["3 · EXPORT in EAST<br/>detect → get_secret → sha256<br/>KMS envelope-encrypt → full snapshot to S3"]
-    S3 --> S3b["3b · S3 CRR<br/>east bucket → west bucket"]
-    S3b --> S4["4 · IMPORT in WEST (destination-aware)<br/>read bundle + live state → diff → apply<br/>added=5, acls=1"]
-    S4 --> V1{"hashes<br/>east == west?"}
-    V1 -->|yes| S5["5 · Re-import (idempotency)<br/>in_sync · skipped=5"]
-    S5 --> S6["6 · Incremental: rotate + delete in EAST<br/>export → CRR → import<br/>updated=1 · deleted=1 · skipped=3"]
-    S6 --> S7["7 · Failback: change in WEST<br/>export WEST → CRR → import EAST<br/>updated=1 · api_token converges"]
-    S7 --> S8["8 · Audit tables (EXPORT / IMPORT rows)"]
-
-    S4 -. "blocker: KMS single-region key" .-> F1["Fix: migrate to KMS<br/>Multi-Region Key"]
-    F1 -. retry .-> S4
-    S3b -. "blocker: CRR on old key" .-> F2["Fix: repoint CRR role +<br/>ReplicaKmsKeyID to MRK"]
-    F2 -. retry .-> S3b
+    S1["1 · Control tables<br/>EAST + WEST"] --> S2["2 · Seed 5 secrets in EAST<br/>2 scopes, 1 ACL"]
+    S2 --> S3["3 · REPLICATE primary → secondary (direct)<br/>read EAST + read WEST → diff → apply delta<br/>added=1 · updated=4"]
+    S3 --> V1{"hashes<br/>east == west?"}
+    V1 -->|yes| S4["4 · Re-replicate (idempotency)<br/>in_sync · skipped=5"]
+    S4 --> S5["5 · Incremental: rotate + delete in EAST<br/>replicate → updated=1 · deleted=1 · skipped=3"]
+    S5 --> S6["6 · Failback: change in WEST<br/>replicate WEST → EAST → updated=1<br/>api_token converges"]
+    S6 --> S7["7 · Audit tables (REPLICATE rows, both workspaces)"]
 
     classDef ok fill:#e6fcf5,stroke:#0ca678,color:#000;
-    classDef fix fill:#fff4e6,stroke:#e8590c,color:#000;
-    class S1,S2,S3,S3b,S4,S5,S6,S7,S8 ok;
-    class F1,F2 fix;
+    class S1,S2,S3,S4,S5,S6,S7 ok;
 ```
 
-Green = the steady-state flow; orange = the two blockers hit mid-test and the fixes applied
-before the run went fully green (Findings 1 & 2).
+No object storage, no CRR, no cross-region key — every hop is a Secrets-API call over TLS,
+so there are no async-replication waits and each step is seconds.
 
 ---
 
@@ -44,19 +41,15 @@ before the run went fully green (Findings 1 & 2).
 
 | | Primary (active) | Secondary (passive) |
 |---|---|---|
-| Workspace | `fe-sandbox-…-ps-dr-wp-us-east-2` (id 7474657900994867) | `fe-sandbox-…-ps-dr-wp-us-west-2` (id 7474651252878032) |
+| Workspace | `…-ps-dr-wp-us-east-2` (id 7474657900994867) | `…-ps-dr-wp-us-west-2` (id 7474651252878032) |
 | Region | us-east-2 | us-west-2 |
-| S3 bucket | `dr-secrets-us-east-2-332745928618` | `dr-secrets-us-west-2-332745928618` |
-| SQL warehouse | `63af3d742ebd95ab` | `4ca723533b34106a` |
+| CLI profile | `dr-east` | `dr-west` |
+| Control catalog | `dr_poc` | `fe_sandbox_ps_dr_wp_us_west_2_catalog` (default; see below) |
 
-**KMS:** `alias/dr-secrets-us-east-2` and `alias/dr-secrets-us-west-2` both resolve to a
-single **Multi-Region Key** `mrk-837ba5a7e3fb49569e666446a7b0992d` (PRIMARY in east,
-REPLICA in west) — see Finding 1. **CRR:** bidirectional on the `secrets/` prefix, replica
-key = the MRK. AWS account `332745928618`.
-
-**How it was run:** locally, SDK auth via the `dr-east`/`dr-west` CLI profiles, AWS via the
-boto3 chain. The test is scoped to the seed scopes only (`dr_app_prod`, `dr_app_analytics`)
-so mirror-mode never touches unrelated sandbox secrets.
+**How it was run:** locally, SDK auth via the `dr-east`/`dr-west` profiles. The `replicate`
+job reads both workspaces and pushes the delta into the destination over the Secrets API.
+Scoped to the seed scopes only (`dr_app_prod`, `dr_app_analytics`) so mirror-mode never
+touches unrelated sandbox secrets.
 
 ---
 
@@ -64,139 +57,82 @@ so mirror-mode never touches unrelated sandbox secrets.
 
 | # | Step | Result | Evidence |
 |---|---|---|---|
-| 1 | Control tables created in **both** workspaces | ✅ | `dr_poc.dr_control.{dr_secrets_inventory,dr_secrets_audit}` created in east + west |
-| 2 | Seed 5 sample secrets in PRIMARY (2 scopes, 1 ACL) | ✅ | `dr_app_prod`{db_password,api_token,service_url} + `dr_app_analytics`{warehouse_token,s3_access_key} |
-| 3 | **Baseline export** east → S3 | ✅ | bundle 5 items, 3,676 bytes, **plaintext_leak=False**, **snapshot=full**, 26.5 s |
-| 3b | **CRR** east bucket → west bucket | ✅ | `ReplicationStatus=COMPLETED`, `_latest` pointer replicated |
-| 4 | **Failover import** into WEST (destination-aware) | ✅ | `added=5, acls=1`; **east & west sha256 identical for all 5 keys** |
-| 5 | **Idempotency** — re-import with no changes | ✅ | `in_sync=True, skipped=5` (nothing re-decrypted/rewritten) |
-| 6 | **Incremental** — rotate `db_password` + delete `service_url`, export, import | ✅ | export `changed=4, deleted=1`; import **`updated=1, deleted=1, skipped=3`**; hashes match |
-| 7 | **Failback** — change `api_token` in WEST, export WEST → CRR → import into EAST (roles swapped) | ✅ | import `updated=1, skipped=3`; **east `api_token` == west `api_token`** |
-| 8 | Audit tables (both workspaces) | ✅ | east records EXPORT + IMPORT (failback); **west** records IMPORT×3 + EXPORT (failback source) once its control catalog was set (Finding 7, resolved) |
+| 1 | Control tables in **both** workspaces | ✅ | east `dr_poc.dr_control`; west `fe_sandbox_ps_dr_wp_us_west_2_catalog.dr_control` |
+| 2 | Seed 5 secrets in EAST (2 scopes, 1 ACL) | ✅ | `dr_app_prod`{db_password,api_token,service_url} + `dr_app_analytics`{warehouse_token,s3_access_key} |
+| 3 | **Replicate** primary → secondary | ✅ | `added=1, updated=4, deleted=0, skipped=0` (50 s); **east & west sha256 identical for all 5 keys** |
+| 4 | **Idempotency** — re-replicate | ✅ | `in_sync=True, skipped=5` (5 s) — nothing rewritten |
+| 5 | **Incremental** — rotate `db_password` + delete `service_url` | ✅ | `updated=1, deleted=1, skipped=3` (14 s); hashes match |
+| 6 | **Failback** — change `api_token` in WEST, replicate WEST→EAST | ✅ | `updated=1, skipped=3` (17 s); **east `api_token` == west**; full hashes match |
+| 7 | Audit tables (both workspaces) | ✅ | east: `REPLICATE` forward rows; west: `REPLICATE` failback row |
 
-### Step 6 detail — the diff logic (the important one)
+> Step 3 shows `added=1, updated=4` (not `added=5`) because WEST already held 4 of the 5 keys
+> from a prior run with different values → **updated**, and `service_url` was absent → **added**.
+> On a truly cold secondary this is `added=5`. Either way the destination-aware diff converges
+> WEST to EAST exactly (hashes match).
 
-- The `system.access.audit` scan returned **0 changes** for the just-made rotation/delete
-  (audit-log ingestion latency — see Finding 4).
-- The **full state-diff recon** (the safety net) correctly detected `changed=4, deleted=1`
-  by comparing live values/hashes against the inventory — so the export was correct anyway.
-- The destination-aware **import applied only the delta**: `updated=1` (rotated
-  `db_password`), `deleted=1` (`service_url` tombstone), `skipped=3` (unchanged — not even
-  decrypted). West end-state hashes matched east exactly. This is the core "diff across
-  both workspaces, then apply" behaviour, working as designed.
+### Step 5 detail — the diff logic (the important one)
 
-### Step 7 detail — failback (symmetric)
+Rotating one value and deleting one key, then replicating, produced exactly
+`updated=1 · deleted=1 · skipped=3`: only the rotated key was re-written, the deleted key was
+tombstoned in WEST (mirror mode), and the three unchanged keys were **skipped** (not
+rewritten). This is the "diff both live workspaces, then apply only the delta" behaviour.
 
-To prove failback, `api_token` was changed in **WEST** (simulating work done while WEST
-was the active primary), then the flow was run with the **roles swapped** (config primary↔
-secondary and the bucket mapping swapped): export from WEST → CRR west→east → import into
-EAST. The import was destination-aware: `added=0, updated=1 (api_token), deleted=0,
-skipped=3`, and **east's `api_token` hash then equalled west's**. Steady state is
-restored symmetrically — the same code runs both directions.
-
-### Audit trail (east control tables)
+### Audit trail (both workspaces)
 
 ```
-EXPORT  SUCCESS  us-east-2->us-west-2  n=5  snapshot items=5 deleted=0 scopes=2   (baseline, ×3 test runs)
-EXPORT  SUCCESS  us-east-2->us-west-2  n=4  snapshot items=4 deleted=1 scopes=2   (incremental: rotate + delete)
-IMPORT  SUCCESS  us-west-2->us-east-2  n=1  added=0 updated=1 deleted=0 skipped=3 mode=mirror   (failback)
+[east] REPLICATE SUCCESS  us-east-2->us-west-2  added=1 updated=4 deleted=0 skipped=0   (initial)
+[east] REPLICATE SKIPPED  us-east-2->us-west-2  in sync (skipped=5)                     (idempotency)
+[east] REPLICATE SUCCESS  us-east-2->us-west-2  added=0 updated=1 deleted=1 skipped=3   (incremental)
+[west] REPLICATE SUCCESS  us-west-2->us-east-2  added=0 updated=1 deleted=0 skipped=3   (failback)
 ```
-`dr_secrets_inventory` (east) ends with `service_url = DELETED`, the other four `IN_SYNC` —
-matching the live workspace state.
-
-### Audit trail (west control tables — after Finding 7 fix)
-
-Once west's control tables were placed in a catalog with valid managed storage (its default
-catalog), the passive side records its own history too:
-
-```
-IMPORT  SUCCESS  us-east-2->us-west-2  n=5  added=1 updated=4 deleted=0 skipped=0   (failover)
-IMPORT  SKIPPED  us-east-2->us-west-2  n=0  in sync (skipped=5)                     (idempotency)
-IMPORT  SUCCESS  us-east-2->us-west-2  n=1  updated=1 deleted=1 skipped=3           (incremental)
-EXPORT  SUCCESS  us-west-2->us-east-2  n=4  snapshot items=4 deleted=0 scopes=2     (failback source)
-```
+(east also retains EXPORT/IMPORT rows from the earlier S3-variant test runs.)
 
 ---
 
-## Findings & fixes
+## Findings & observations
 
-**Finding 1 — Cross-region envelope decryption requires KMS Multi-Region Keys.** *(blocker, fixed)*
-The first import failed with `kms:Decrypt … resource does not exist in this Region`. The
-envelope data key was wrapped by the **east** key, but KMS keys are regional, so the west
-importer couldn't unwrap it locally — and in a real east-region outage, reaching the east
-key would be impossible anyway. **Fix:** migrated both regional keys to a single **Multi-Region
-Key** (primary in east, replica in west); both region aliases now point at it, so the promoted
-secondary decrypts **locally**. No application code changed — `kms.decrypt` in the local region
-just works once the replica exists. *This is the correct DR design and the provisioner should
-create MRKs from the start.*
+**F1 — the diff is a live-vs-live secret comparison, not system tables.** Replication reads
+both workspaces' live secrets (values via `get_secret` → sha256, plus `list_acls`) and diffs
+by value hash + ACL signature. `system.access.audit` is not involved (it wouldn't help — it
+logs mutation events, not values).
 
-**Finding 2 — CRR needs KMS permission on the MRK.** *(fixed)*
-After the MRK migration, CRR went to `ReplicationStatus=FAILED`: the `dr-secrets-crr-role`
-policy and the rule's `ReplicaKmsKeyID` still referenced the old regional keys. **Fix:**
-updated the CRR role policy to allow `Decrypt/Encrypt/GenerateDataKey` on the MRK ARNs and
-set each rule's `ReplicaKmsKeyID` to the MRK. Replication returned to `COMPLETED`.
+**F2 — ACLs (secret "grants") are replicated.** Each scope's ACLs are captured and applied
+(`put_acl`, plus `delete_acl` in mirror mode). **Caveat:** an ACL principal must exist in the
+destination workspace or `put_acl` fails — we log and continue. (In this run the seeded ACL
+principal was the running user, present in both, so `acls` applied cleanly.)
 
-**Finding 3 — `_latest` pointer replication race.** *(fixed in test harness)*
-The importer reads `_latest.txt` then the bundle it names. Right after an export, the bundle
-object can replicate before the pointer, so a naive import can read a **stale** pointer.
-**Fix:** the test waits until the destination `_latest.txt` equals the new bundle id before
-importing. *Recommendation:* in production, either import on a slight delay or have the
-importer verify the pointed-at bundle exists locally and fall back to polling.
+**F3 — `SqlExecutor` fails loud (carried over, kept).** The off-cluster SQL executor raises on
+`FAILED` statements instead of returning quietly — control-plane errors surface instead of
+silently no-op'ing.
 
-**Finding 4 — `system.access.audit` has ingestion latency.** *(by design; validated)*
-A secret mutation was **not** visible in `system.access.audit` seconds later, so the
-audit-based detector saw nothing. The **full state-diff recon** caught it. Conclusion: treat
-the audit scan as an optimization for *what changed*, and keep `full_recon: true` as the
-authority for correctness. RPO must not assume the audit stream is instantaneous.
+**F4 — per-workspace control catalog (carried over, kept).** A fresh `dr_poc` catalog in the
+west metastore has no managed storage, so west's control tables live in its **default catalog**
+via `control.catalog_by_workspace`. Both workspaces' audit tables populate.
 
-**Finding 5 — CRR tail latency is variable.** *(observation)*
-CRR completed in **seconds** for the baseline, but one incremental round took **~6.5 minutes**
-for the pointer to replicate. S3 CRR is asynchronous/best-effort (SLA is 15 min for the
-default tier). **RPO = export cadence + CRR tail**, not just the export schedule. For a tighter,
-bounded RPO consider **S3 Replication Time Control (RTC)** (15-min SLA with metrics/alarms).
+**F5 — trade-off of dropping S3/KMS.** There is no independent, versioned, offsite encrypted
+backup any more — the only copies are in the two workspaces' secret managers. Values move over
+TLS and are encrypted at rest by the platform on both sides. Acceptable for warm-standby DR;
+note it if an offline archive is also required.
 
-**Finding 6 — the off-cluster `SqlExecutor` swallowed failed statements.** *(bug, fixed)*
-The SDK statement-execution path returned the `StatementResponse` without checking its
-status, so a **FAILED** statement (e.g. control-table DDL that errored) returned quietly and
-callers saw empty data. The test even printed *"[west] control tables ready"* while the DDL
-had actually failed. **Fix:** `SqlExecutor.execute` now inspects the status and **raises** on
-`FAILED/CANCELED/CLOSED` with the error message. This immediately surfaced Finding 7.
-*Lesson: the control plane was failing silently; only the pure-SDK data path was truly
-verified until this was fixed.*
-
-**Finding 7 — the WEST metastore can't host a fresh `dr_poc` catalog.** *(environment gap → resolved)*
-With Finding 6 fixed, creating a managed Delta table in a fresh west `dr_poc` catalog failed:
-`EXTERNAL_LOCATION_DOES_NOT_EXIST … ankita-dr-wp-us-west-2-ext-s3-…/dr_managed/… does not
-exist`. The catalog/schema (metadata) created fine, but that catalog had **no managed storage
-location**, so no table could be created. This never affected the DR data path (secret
-replication is pure SDK and was fully verified) — only the audit/inventory tables on the
-passive side. **Resolved:** added a **per-workspace control catalog** (`control.catalog_by_workspace`)
-and pointed west at its **default catalog** (which has valid managed storage). A follow-up run
-confirmed west's control tables create and record IMPORT/EXPORT history. *(Alternative: create
-`dr_poc` in west with an explicit `MANAGED LOCATION` on a real external location.)*
+**F6 — RPO/RTO.** RPO = replicate cadence (synchronous push, no async tail). RTO ≈ promotion
+time — WEST is a warm mirror, so there is no import step on failover.
 
 ---
 
 ## Repo changes made as a result
 
-- **KMS → Multi-Region Key** (live) + `scripts/provision_secrets_dr_aws.sh` rewritten to
-  create an MRK (primary in east, replica in west) and to scope CRR/compute KMS grants to it.
-- **CRR** role policy + `ReplicaKmsKeyID` updated (live) to the MRK.
-- **`SqlExecutor.execute` now raises on failed statements** (`src/databricks_dr/common/sql.py`)
-  — control-plane failures are loud instead of silent (Finding 6).
-- **Per-workspace control catalog** (`control.catalog_by_workspace` in config; `export`/`import`
-  resolve the audit/inventory tables per workspace). West points at its default catalog so its
-  control plane works (Finding 7); east keeps `dr_poc`.
-- Test harness `scripts/e2e_secrets_dr_test.py` added (the exact steps above, re-runnable);
-  it waits for the `_latest` pointer to replicate before importing (Finding 3).
-- `config/secrets_dr_config.yaml`: real workspace ids filled in.
+- **Direct-replication module** `modules/secrets/replicate.py` (read both → diff → apply delta),
+  parameterised direction (failover/failback); `runner.py` exposes `replicate` / `failback`.
+- **Removed** the S3/KMS/CRR path: `store.py`, `crypto.py`, `export.py`, `import_.py`, the AWS
+  provisioner, and the export/import notebooks. `changefeed.py` trimmed to the live-state reader.
+- Config/bundle/deps updated (no `storage` section; deps drop `boto3`/`cryptography`); new
+  `10_replicate_secrets.py` notebook (reaches the peer via a PAT in a local secret scope).
+- Test harness `scripts/e2e_secrets_dr_test.py` rewritten for the direct flow.
 
 ## Recommendations / next steps
 
-1. Adopt **S3 RTC** if a bounded RPO is required; add CloudWatch alarms on
-   `ReplicationLatency` / `OperationsFailedReplication`.
-2. Run the same flow **from Databricks jobs** (Asset Bundle) as the DR service principal,
-   using the `dr-secrets-uc-role` / instance profile, to validate the on-cluster identity +
-   KMS grants end-to-end (this run used a local admin identity).
-3. Wire the control-table **audit/inventory** into a health check + alert (both east and west
-   tables now populate; add `v_dr_secrets_failures` monitoring).
+1. Run the flow **from the Databricks job** (Asset Bundle `dr_secrets_replicate`) as the DR
+   service principal, with the peer PAT in the `dr_peer` scope, to validate the on-cluster path.
+2. Wire `dr_secrets_audit` / `v_dr_secrets_failures` into a health check + alert.
+3. If an offline encrypted archive is also required, add it as a separate export (the removed
+   S3/KMS path remains in git history for reference).

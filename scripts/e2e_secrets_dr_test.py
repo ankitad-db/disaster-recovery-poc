@@ -1,29 +1,25 @@
 #!/usr/bin/env python3
-"""End-to-end live test for Workspace Secrets DR (primary=east, secondary=west).
+"""End-to-end live test for DIRECT cross-workspace Secrets DR (primary=east, secondary=west).
 
-Exercises the full lifecycle against the two sandbox workspaces + the real S3/KMS/CRR
-assets, printing a labelled log that the test report is built from:
+No S3 / CRR / KMS. Exercises the full lifecycle against the two sandbox workspaces:
 
   1. control tables in both workspaces          (audit backend)
   2. seed sample secrets in the PRIMARY
-  3. baseline export  east -> S3 -> CRR -> west  + verify bundle has no plaintext
-  4. failover import  into west (destination-aware) + verify hashes match east
-  5. re-import (idempotency)                     -> expect in_sync / all skipped
-  6. incremental: rotate one key + delete one    -> export -> import
-                                                     expect updated=1, deleted=1, skipped=rest
-  7. failback: export west -> CRR -> east -> import into east (roles swapped)
-  8. dump the audit tables
+  3. replicate primary -> secondary (direct)     + verify hashes match
+  4. re-replicate (idempotency)                  -> expect in_sync / all skipped
+  5. incremental: rotate one key + delete one    -> replicate
+                                                    expect updated=1, deleted=1, skipped=rest
+  6. failback: change in WEST -> replicate west -> east + verify east converges
+  7. dump the audit tables (both workspaces)
 
-SAFETY: scopes.include is pinned to the seed scopes only, so mirror-mode import never
-touches unrelated sandbox secrets.
+SAFETY: scopes.include is pinned to the seed scopes only, so mirror-mode never touches
+unrelated sandbox secrets.
 
-Run:  AWS creds in env + dr-east/dr-west profiles authed.
-      .venv/bin/python scripts/e2e_secrets_dr_test.py
+Run:  dr-east/dr-west profiles authed.  .venv/bin/python scripts/e2e_secrets_dr_test.py
 """
 from __future__ import annotations
 
 import base64
-import copy
 import hashlib
 import sys
 import time
@@ -33,8 +29,7 @@ sys.path.insert(0, "src")
 from databricks.sdk import WorkspaceClient  # noqa: E402
 
 from databricks_dr.common.sql import SqlExecutor, rows  # noqa: E402
-from databricks_dr.modules.secrets import changefeed, control, export as exportmod  # noqa: E402
-from databricks_dr.modules.secrets import import_ as importmod, seed as seedmod  # noqa: E402
+from databricks_dr.modules.secrets import changefeed, control, replicate as repl, seed as seedmod  # noqa: E402
 from databricks_dr.modules.secrets.config import load_config  # noqa: E402
 
 EAST_WH = "63af3d742ebd95ab"
@@ -46,56 +41,30 @@ def hr(title: str) -> None:
     print(f"\n{'=' * 78}\n{title}\n{'=' * 78}", flush=True)
 
 
-def value_hashes(wc, include, exclude):
-    """{(scope,key): sha256hex} for the live in-scope secrets in a workspace."""
+def value_hashes(wc):
     out = {}
-    live = changefeed.live_state(wc, include, exclude)
-    for scope, info in live.items():
+    for scope, info in changefeed.live_state(wc, SEED_SCOPES, []).items():
         for key in info["keys"]:
             try:
                 v = wc.secrets.get_secret(scope=scope, key=key).value
                 out[(scope, key)] = hashlib.sha256(base64.b64decode(v)).hexdigest()[:16]
             except Exception as e:  # noqa: BLE001
-                out[(scope, key)] = f"ERR:{str(e)[:40]}"
+                out[(scope, key)] = f"ERR:{str(e)[:30]}"
     return out
 
 
-def wait_latest(s3, bucket, prefix, expected_bid, tries=48, delay=5):
-    """Poll until the bucket's _latest.txt equals expected_bid (CRR pointer caught up)."""
-    for _ in range(tries):
-        try:
-            cur = s3.get_object(Bucket=bucket, Key=f"{prefix}/_latest.txt")["Body"].read().decode().strip()
-            if cur == expected_bid:
-                return True
-        except Exception:  # noqa: BLE001
-            pass
-        time.sleep(delay)
-    return False
-
-
 def wait_warehouse(wc, wid, label):
-    for _ in range(30):
-        st = wc.warehouses.get(id=wid).state
-        if str(st).endswith("RUNNING"):
+    for _ in range(40):
+        if str(wc.warehouses.get(id=wid).state).endswith("RUNNING"):
             print(f"  warehouse {label} RUNNING")
-            return True
-        print(f"  warehouse {label} {st}; waiting...")
+            return
         time.sleep(10)
-    return False
 
 
 def setup_control(ex, region_key, cfg, label):
-    """Create the control tables in this workspace's control catalog. Returns True on success.
-
-    The catalog comes from cfg.control_catalog_for(region_key): the framework's own
-    `dr_poc` (created here) or a per-workspace override catalog that already exists.
-    """
     cat = cfg.control_catalog_for(region_key)
     sch = cfg.control["schema"]
-    ddl = []
-    if cat == cfg.control["catalog"]:            # our own catalog -> create it
-        ddl.append(f"CREATE CATALOG IF NOT EXISTS {cat}")
-    ddl += [
+    ddl = ([f"CREATE CATALOG IF NOT EXISTS {cat}"] if cat == cfg.control["catalog"] else []) + [
         f"CREATE SCHEMA IF NOT EXISTS {cat}.{sch} COMMENT 'DR control plane'",
         f"""CREATE TABLE IF NOT EXISTS {cat}.{sch}.dr_secrets_inventory (
             scope STRING NOT NULL, secret_key STRING NOT NULL, value_hash STRING,
@@ -106,154 +75,71 @@ def setup_control(ex, region_key, cfg, label):
             scope STRING, item_count INT, status STRING, bundle_id STRING, duration_sec DOUBLE,
             detail STRING, actor STRING) USING DELTA""",
     ]
-    try:
-        for s in ddl:
-            ex.execute(s)
-        print(f"  [{label}] control tables ready in {cat}.{sch}")
-        return True
-    except Exception as e:  # noqa: BLE001
-        print(f"  [{label}] control-table setup FAILED (auditing disabled): {str(e)[:160]}")
-        return False
+    for s in ddl:
+        ex.execute(s)
+    print(f"  [{label}] control tables ready in {cat}.{sch}")
 
 
 def dump_audit(ex, table, label):
-    if not ex.available:
-        print(f"  [{label}] (no audit backend)")
-        return
-    try:
-        res = ex.execute(
-            f"SELECT operation, status, direction, item_count, bundle_id, detail "
-            f"FROM {table} ORDER BY event_time"
-        )
-        cols = ["operation", "status", "direction", "item_count", "bundle_id", "detail"]
-        for r in rows(res, cols):
-            print(f"  [{label}] {r['operation']:<7} {r['status']:<8} {r['direction']:<20} "
-                  f"n={r['item_count']} {r['detail']}")
-    except Exception as e:  # noqa: BLE001
-        print(f"  [{label}] audit dump error: {str(e)[:120]}")
+    cols = ["operation", "status", "direction", "item_count", "detail"]
+    for r in rows(ex.execute(f"SELECT operation,status,direction,item_count,detail FROM {table} ORDER BY event_time"), cols):
+        print(f"  [{label}] {r['operation']:<9} {r['status']:<8} {str(r['direction']):<20} n={r['item_count']}  {r['detail']}")
 
 
 def main() -> int:
     cfg = load_config("config/secrets_dr_config.yaml")
-    # SAFETY: bound the test to the seed scopes only.
-    cfg.raw["scopes"] = {"include": SEED_SCOPES, "exclude": []}
+    cfg.raw["scopes"] = {"include": SEED_SCOPES, "exclude": []}   # SAFETY: bound the test
 
     east = WorkspaceClient(profile="dr-east")
     west = WorkspaceClient(profile="dr-west")
 
-    hr("0. WAREHOUSES")
+    hr("0. WAREHOUSES (for control tables)")
     wait_warehouse(east, EAST_WH, "east")
     wait_warehouse(west, WEST_WH, "west")
     ex_east = SqlExecutor(workspace_client=east, warehouse_id=EAST_WH, wait_timeout="50s")
     ex_west = SqlExecutor(workspace_client=west, warehouse_id=WEST_WH, wait_timeout="50s")
 
     hr("1. CONTROL TABLES (both workspaces)")
-    audit_east = setup_control(ex_east, "primary", cfg, "east")
-    audit_west = setup_control(ex_west, "secondary", cfg, "west")
-    if not audit_east:
-        ex_east = SqlExecutor(workspace_client=east)  # no-op backend
-    if not audit_west:
-        ex_west = SqlExecutor(workspace_client=west)
+    setup_control(ex_east, "primary", cfg, "east")
+    setup_control(ex_west, "secondary", cfg, "west")
 
     hr("2. SEED sample secrets in PRIMARY (east)")
     print(" ", seedmod.run_seed(cfg, wc=east))
-    src = value_hashes(east, SEED_SCOPES, [])
-    print("  east secrets:", {f"{s}/{k}": h for (s, k), h in sorted(src.items())})
+    print("  east:", {f"{s}/{k}": h for (s, k), h in sorted(value_hashes(east).items())})
 
-    hr("3. BASELINE EXPORT (east -> S3 -> CRR -> west bucket)")
-    r = exportmod.run_export(cfg, wc=east, ex=ex_east, force_full=True)
-    print("  export:", r)
-    import boto3
-    from databricks_dr.modules.secrets import store
-    s3e = boto3.client("s3", region_name="us-east-2")
-    bkt_e = cfg.storage["primary_bucket"].replace("s3://", "")
-    bid = s3e.get_object(Bucket=bkt_e, Key="secrets/_latest.txt")["Body"].read().decode().strip()
-    body = s3e.get_object(Bucket=bkt_e, Key=f"secrets/{bid}/bundle.json")["Body"].read().decode()
-    # Real plaintext-leak check: no live secret VALUE should appear in the bundle.
-    plain_vals = []
-    for (s, k) in src:
-        try:
-            plain_vals.append(base64.b64decode(east.secrets.get_secret(scope=s, key=k).value).decode())
-        except Exception:  # noqa: BLE001
-            pass
-    has_plain = any(pv and pv in body for pv in plain_vals)
-    snapshot_full = '"snapshot": "full"' in body
-    print(f"  bundle_id={bid}  bytes={len(body)}  plaintext_leak={has_plain}  snapshot_full={snapshot_full}")
-
-    hr("3b. WAIT FOR CRR replication to WEST bucket")
-    s3w = boto3.client("s3", region_name="us-west-2")
-    bkt_w = cfg.storage["secondary_bucket"].replace("s3://", "")
-    replicated = False
-    for _ in range(30):
-        try:
-            s3w.head_object(Bucket=bkt_w, Key=f"secrets/{bid}/bundle.json")
-            replicated = True
-            break
-        except Exception:  # noqa: BLE001
-            time.sleep(5)
-    rs = s3e.head_object(Bucket=bkt_e, Key=f"secrets/{bid}/bundle.json").get("ReplicationStatus")
-    ptr_ok = wait_latest(s3w, bkt_w, "secrets", bid)
-    print(f"  replicated_to_west={replicated}  east_object_ReplicationStatus={rs}  west_latest_pointer_matches={ptr_ok}")
-
-    hr("4. FAILOVER IMPORT into WEST (destination-aware)")
-    r = importmod.run_import(cfg, region_key="secondary", wc=west, ex=ex_west)
-    print("  import:", r)
-    dst = value_hashes(west, SEED_SCOPES, [])
-    print("  west secrets:", {f"{s}/{k}": h for (s, k), h in sorted(dst.items())})
+    hr("3. REPLICATE primary -> secondary (direct)")
+    r = repl.run_replicate(cfg, source_key="primary", dest_key="secondary",
+                           src_wc=east, dst_wc=west, ex=ex_east)
+    print("  replicate:", r)
+    src, dst = value_hashes(east), value_hashes(west)
+    print("  west:", {f"{s}/{k}": h for (s, k), h in sorted(dst.items())})
     print(f"  HASHES MATCH east==west: {src == dst}")
 
-    hr("5. IDEMPOTENCY — re-import (expect in_sync / all skipped)")
-    r = importmod.run_import(cfg, region_key="secondary", wc=west, ex=ex_west)
-    print("  re-import:", r)
+    hr("4. IDEMPOTENCY — re-replicate (expect in_sync / all skipped)")
+    print("  replicate:", repl.run_replicate(cfg, src_wc=east, dst_wc=west, ex=ex_east))
 
-    hr("6. INCREMENTAL — rotate db_password + delete service_url in EAST")
-    east.secrets.put_secret(scope="dr_app_prod", key="db_password",
-                            string_value="rotated-" + str(int(time.time())))
+    hr("5. INCREMENTAL — rotate db_password + delete service_url in EAST, then replicate")
+    east.secrets.put_secret(scope="dr_app_prod", key="db_password", string_value="rot-" + str(int(time.time())))
     try:
         east.secrets.delete_secret(scope="dr_app_prod", key="service_url")
     except Exception as e:  # noqa: BLE001
-        print("  (delete service_url:", str(e)[:80], ")")
-    src2 = value_hashes(east, SEED_SCOPES, [])
-    print("  east now:", {f"{s}/{k}": h for (s, k), h in sorted(src2.items())})
-    r = exportmod.run_export(cfg, wc=east, ex=ex_east, force_full=False)
-    print("  export:", r)
-    if r.get("bundle_id"):
-        print("  west_latest_pointer_matches:", wait_latest(s3w, bkt_w, "secrets", r["bundle_id"]))
-    r = importmod.run_import(cfg, region_key="secondary", wc=west, ex=ex_west)
-    print("  import:", r, " <- expect updated=1, deleted=1, skipped=rest")
-    dst2 = value_hashes(west, SEED_SCOPES, [])
-    print("  west now:", {f"{s}/{k}": h for (s, k), h in sorted(dst2.items())})
-    print(f"  HASHES MATCH after incremental: {src2 == dst2}")
+        print("  (delete service_url:", str(e)[:60], ")")
+    r = repl.run_replicate(cfg, src_wc=east, dst_wc=west, ex=ex_east)
+    print("  replicate:", r, " <- expect updated=1, deleted=1, skipped=rest")
+    src, dst = value_hashes(east), value_hashes(west)
+    print(f"  HASHES MATCH after incremental: {src == dst}")
 
-    hr("7. FAILBACK — export WEST -> CRR -> EAST -> import into EAST (roles swapped)")
-    # Make a change in WEST (simulating work while it was the active primary).
-    west.secrets.put_secret(scope="dr_app_prod", key="api_token",
-                            string_value="westside-" + str(int(time.time())))
-    fb = copy.deepcopy(cfg.raw)
-    fb["workspaces"]["primary"], fb["workspaces"]["secondary"] = (
-        fb["workspaces"]["secondary"], fb["workspaces"]["primary"])
-    fb["storage"]["primary_bucket"], fb["storage"]["secondary_bucket"] = (
-        fb["storage"]["secondary_bucket"], fb["storage"]["primary_bucket"])
-    # Swap the per-workspace control-catalog override too, so failback audit lands in
-    # the right catalog for each (now-swapped) role.
-    cbw = (fb.get("control") or {}).get("catalog_by_workspace") or {}
-    fb["control"]["catalog_by_workspace"] = {
-        k: v for k, v in {"primary": cbw.get("secondary"), "secondary": cbw.get("primary")}.items() if v
-    }
-    from databricks_dr.modules.secrets.config import SecretsConfig
-    cfg_fb = SecretsConfig(raw=fb, path=cfg.path).validate()
-    r = exportmod.run_export(cfg_fb, wc=west, ex=ex_west, force_full=True)
-    print("  export(west):", r)
-    if r.get("bundle_id"):  # failback destination is east (cfg_fb secondary bucket == east bucket)
-        print("  east_latest_pointer_matches:", wait_latest(s3e, bkt_e, "secrets", r["bundle_id"]))
-    r = importmod.run_import(cfg_fb, region_key="secondary", wc=east, ex=ex_east)  # secondary==east here
-    print("  import(east):", r)
-    src3 = value_hashes(east, SEED_SCOPES, [])
-    dst3 = value_hashes(west, SEED_SCOPES, [])
-    print(f"  east api_token now == west api_token: "
-          f"{src3.get(('dr_app_prod','api_token')) == dst3.get(('dr_app_prod','api_token'))}")
+    hr("6. FAILBACK — change api_token in WEST, replicate WEST -> EAST")
+    west.secrets.put_secret(scope="dr_app_prod", key="api_token", string_value="west-" + str(int(time.time())))
+    r = repl.run_replicate(cfg, source_key="secondary", dest_key="primary",
+                           src_wc=west, dst_wc=east, ex=ex_west)
+    print("  replicate(failback):", r)
+    src, dst = value_hashes(east), value_hashes(west)
+    print(f"  east api_token == west api_token: "
+          f"{src.get(('dr_app_prod','api_token')) == dst.get(('dr_app_prod','api_token'))}")
+    print(f"  HASHES MATCH after failback: {src == dst}")
 
-    hr("8. AUDIT TABLES")
+    hr("7. AUDIT TABLES")
     dump_audit(ex_east, cfg.audit_table_for("primary"), "east")
     dump_audit(ex_west, cfg.audit_table_for("secondary"), "west")
 

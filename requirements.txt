@@ -1,6 +1,5 @@
 # Workspace Secrets DR — runtime dependencies.
+# Direct cross-workspace replication over the Secrets API: no object storage, no AWS.
 # SDK-only design: the same code runs in a Databricks notebook, a job, or locally.
 databricks-sdk>=0.30   # Secrets API (get_secret / put_secret / ACLs), workspace client
 PyYAML>=6.0            # config/secrets_dr_config.yaml
-boto3>=1.28            # S3 bundle store + KMS data keys
-cryptography>=41       # AES-256-GCM envelope encryption of secret values

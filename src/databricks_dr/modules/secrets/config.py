@@ -68,21 +68,16 @@ class SecretsConfig:
 
     @property
     def reconcile(self) -> Dict[str, Any]:
-        """Destination-aware import (failover) behaviour.
+        """Direct-replication behaviour.
 
-        mode: ``mirror`` (secondary ends up == primary, incl. pruning secrets/scopes
-        that no longer exist in primary) or ``additive`` (only add/update, never
-        delete). ``prune_extra_scopes`` also removes whole scopes absent from the
-        bundle when mirroring.
+        mode: ``mirror`` (destination ends up == source, incl. pruning secrets/scopes
+        that no longer exist in the source) or ``additive`` (only add/update, never
+        delete). ``prune_extra_scopes`` also removes whole scopes absent from the source.
         """
         r = dict(self.raw.get("reconcile") or {})
         r.setdefault("mode", "mirror")
         r.setdefault("prune_extra_scopes", False)
         return r
-
-    @property
-    def storage(self) -> Dict[str, Any]:
-        return self.raw["storage"]
 
     @property
     def control(self) -> Dict[str, Any]:
@@ -139,38 +134,17 @@ class SecretsConfig:
     def warehouse_id(self) -> str:
         return self.control.get("warehouse_id", "") or ""
 
-    def bucket_for(self, region: str) -> str:
-        s = self.storage
-        if region == self.workspaces["primary"].region:
-            return s["primary_bucket"]
-        if region == self.workspaces["secondary"].region:
-            return s["secondary_bucket"]
-        raise SecretsConfigError(f"no bucket configured for region {region!r}")
-
-    def kms_key_for(self, region: str) -> str:
-        return self.storage.get("kms_key", {}).get(region, "")
-
     def validate(self) -> "SecretsConfig":
         errors: List[str] = []
-        for k in ("primary_bucket", "secondary_bucket", "prefix"):
-            if not self.storage.get(k):
-                errors.append(f"storage.{k} is required")
         for k in ("catalog", "schema"):
             if not self.control.get(k):
                 errors.append(f"control.{k} is required")
-        if self.storage.get("client_side_encryption", True):
-            for ws in self.workspaces.values():
-                if not self.kms_key_for(ws.region):
-                    errors.append(f"storage.kms_key.{ws.region} required for client-side encryption")
         if errors:
             raise SecretsConfigError(
                 "invalid secrets DR config"
                 + (f" ({self.path})" if self.path else "")
                 + ":\n  - " + "\n  - ".join(errors)
             )
-        for pb in (self.storage["primary_bucket"], self.storage["secondary_bucket"]):
-            if "REPLACE" in pb:
-                _logger.warning("storage bucket %s still has a REPLACE placeholder -- set the real bucket", pb)
         return self
 
 

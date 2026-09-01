@@ -8,20 +8,19 @@ are blocked on a read-only DR secondary until failover).
 
 Design in one paragraph:
 
-* **Export** runs in the PRIMARY workspace. It detects changed secrets
-  (system-tables-first, with a full state-diff recon), reads their values with the
-  ``get-secret`` API, envelope-encrypts them, and writes a bundle to the
-  primary-region S3 bucket.
-* **S3 Cross-Region Replication** (bidirectional) mirrors the bundle to the other
-  region -- no secondary compute required in steady state.
-* **Import** runs in the PROMOTED workspace on failover and is *destination-aware*:
-  it reads the bundle from the local-region bucket, reads the promoted workspace's
-  own live secrets, diffs the two, and applies **only the difference** (add / update
-  / delete / ACL). The first failover into a cold secondary is a full rebuild; later
-  failovers are incremental.
+* A single **replicate** job runs in the ACTIVE workspace. It reads the SOURCE
+  secrets (values via ``get-secret`` -> sha256, plus per-scope ACLs), reads the
+  DESTINATION secrets **cross-workspace** via the Secrets API (reads/writes over the
+  control plane spin up **no compute** on the passive side), **diffs** the two, and
+  applies **only the difference** straight into the destination (``create_scope`` /
+  ``put_secret`` / ``put_acl`` / ``delete_secret`` / ``delete_acl``).
+* Values move source->destination **directly over TLS** — no object storage, no CRR,
+  no KMS envelope. Both workspaces' secret stores are encrypted at rest by the platform.
+* Direction is parameterised, so failover is just ``replicate`` with the roles
+  swapped. The secondary is a **warm mirror**: on a real outage you promote it.
 
 Everything is SDK-only (no ``dbutils``), so the flow runs identically in a
-notebook, a Databricks job, or locally with a CLI profile.
+notebook, a Databricks job, or locally with CLI profiles.
 """
 
 from .config import SecretsConfig, load_config
