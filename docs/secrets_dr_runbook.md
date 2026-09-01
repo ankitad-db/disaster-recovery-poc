@@ -86,10 +86,19 @@ applied, and re-running is a no-op. It also catches drift on the WEST side.
 | KMS alias | `alias/dr-secrets-us-east-2` | `alias/dr-secrets-us-west-2` |
 | CRR rule | `dr-secrets-crr-east-to-west` | `dr-secrets-crr-west-to-east` |
 
+> **KMS must be a Multi-Region Key.** Both region aliases resolve to one MRK (primary in
+> east, replica in west) so the promoted secondary can decrypt the envelope data key
+> **locally** — even if the primary region is down. Independent regional keys do **not**
+> work for cross-region envelope decryption (see the test report, Finding 1).
+
 IAM roles (for running on Databricks compute later): `dr-secrets-uc-role` (serverless/UC),
 `dr-secrets-ec2-role` (+ instance profile `dr-secrets-instance-profile`, classic clusters),
 `dr-secrets-crr-role` (S3 replication). Buckets are versioned, SSE-KMS, public access
 blocked. CRR filter prefix = `secrets/`, delete-marker + KMS-object replication ON.
+
+> **Verified end-to-end on 2026-09-01** — replicate east→west, incremental diff-and-apply,
+> and failback west→east all passed against these live workspaces. See
+> [secrets_dr_test_report.md](secrets_dr_test_report.md) for the run log, observations, and findings.
 
 **Control tables** (per workspace, `dr_poc.dr_control`): `dr_secrets_inventory`
 (per-secret desired state), `dr_secrets_audit` (operation history), and views
@@ -316,7 +325,10 @@ checks as Steps 2–4.
 |---|---|---|
 | Import raises *"target is not writable — promote the workspace"* | WEST is a read-only standby | Promote WEST (make it writable) before importing. Expected on a true Managed-DR standby. |
 | `get_secret` fails on export | DR principal lacks **READ** on the scope | Grant the export identity READ ACL on in-scope scopes. |
+| KMS `AccessDenied` / *"resource does not exist in this Region"* on decrypt | KMS key is **not** multi-region (data key wrapped by a regional key that the other region can't decrypt) | Use a **Multi-Region Key** (the provisioner creates one). Both aliases must resolve to the same MRK. |
 | KMS `AccessDenied` on encrypt/decrypt | Key policy / role missing KMS grant | Confirm the running identity can `GenerateDataKey`/`Decrypt` on the region's `alias/dr-secrets-*`. |
+| CRR stuck at `ReplicationStatus=FAILED` | `dr-secrets-crr-role` / rule `ReplicaKmsKeyID` don't reference the (MR) key | Grant the CRR role KMS on the MRK and set each rule's `ReplicaKmsKeyID` to it (Finding 2). |
+| Control-table setup "succeeds" but tables are empty / `EXTERNAL_LOCATION_DOES_NOT_EXIST` | The target metastore has no valid managed storage for the catalog | Point `control.catalog` at a catalog with valid managed storage, or create `dr_poc` with an explicit `MANAGED LOCATION` (Finding 7). The DR data path is unaffected. |
 | Bundle not in WEST bucket | CRR lag or objects predate the rule | Wait; check `head-object … ReplicationStatus`. CRR only replicates objects written **after** the rule was enabled. |
 | `decrypt` fails with an auth/tag error | EncryptionContext mismatch | `{scope,key}` must match encrypt-time exactly; don't hand-edit bundles or move ciphertext between keys. |
 | Export writes nothing, says "no changes" | Nothing changed since last watermark | Expected. Force a full snapshot with `--full` / `full=true`. |
