@@ -67,7 +67,9 @@ def run_export(
         except Exception as e:  # noqa: BLE001
             _logger.warning("could not auto-resolve primary workspace_id: %s", str(e)[:120])
 
-    inv = control.load_inventory(ex, cfg.inventory_table)
+    audit_table = cfg.audit_table_for("primary")
+    inventory_table = cfg.inventory_table_for("primary")
+    inv = control.load_inventory(ex, inventory_table)
     live = changefeed.live_state(wc, cfg.include, cfg.exclude)
 
     # ---- detect change (system-tables-first, recon safety net) ---------------
@@ -76,7 +78,7 @@ def run_export(
     if force_full or not cfg.use_system_tables:
         cs = changefeed.detect_via_state_diff(live, inv)
     else:
-        since = control.last_export_watermark(ex, cfg.audit_table)
+        since = control.last_export_watermark(ex, audit_table)
         cs = changefeed.detect_via_system_tables(
             ex, audit_table=cfg.audit_system_table,
             service_name=cfg.detection.get("service_name", "secrets"),
@@ -99,7 +101,7 @@ def run_export(
     if not force_full and not cs.changed and not cs.deleted and not inv_deleted:
         dur = time.time() - t0
         control.record_audit(
-            ex, cfg.audit_table, operation="EXPORT", status="SKIPPED", direction=direction,
+            ex, audit_table, operation="EXPORT", status="SKIPPED", direction=direction,
             item_count=0, duration_sec=dur, detail="no changes", actor=actor or cfg.service_principal,
         )
         _logger.info("No secret changes detected; nothing to export.")
@@ -159,15 +161,15 @@ def run_export(
     )
 
     # ---- persist inventory + audit ------------------------------------------
-    control.upsert_inventory(ex, cfg.inventory_table, inv_updates)
+    control.upsert_inventory(ex, inventory_table, inv_updates)
     for d in deletes:
-        control.upsert_inventory(ex, cfg.inventory_table, [{
+        control.upsert_inventory(ex, inventory_table, [{
             "scope": d["scope"], "secret_key": d["key"], "status": "DELETED", "bundle_id": bundle_id,
         }])
     dur = time.time() - t0
     scopes_in_play = sorted(live)
     control.record_audit(
-        ex, cfg.audit_table, operation="EXPORT", status="SUCCESS", direction=direction,
+        ex, audit_table, operation="EXPORT", status="SUCCESS", direction=direction,
         item_count=len(items), bundle_id=bundle_id, duration_sec=dur,
         detail=f"snapshot items={len(items)} deleted={len(deletes)} scopes={len(scopes_in_play)}",
         actor=actor or cfg.service_principal,

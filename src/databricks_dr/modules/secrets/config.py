@@ -114,13 +114,26 @@ class SecretsConfig:
     def audit_system_table(self) -> str:
         return self.detection.get("audit_table", "system.access.audit")
 
+    # Control tables can live in a different catalog per workspace: some metastores
+    # have no managed storage for a fresh `dr_poc` catalog, so a workspace may point
+    # at a catalog that already has managed storage (e.g. its default catalog).
+    def control_catalog_for(self, region_key: str) -> str:
+        overrides = self.control.get("catalog_by_workspace") or {}
+        return overrides.get(region_key) or self.control["catalog"]
+
+    def audit_table_for(self, region_key: str) -> str:
+        return f"{self.control_catalog_for(region_key)}.{self.control['schema']}.dr_secrets_audit"
+
+    def inventory_table_for(self, region_key: str) -> str:
+        return f"{self.control_catalog_for(region_key)}.{self.control['schema']}.dr_secrets_inventory"
+
     @property
-    def audit_table(self) -> str:
-        return self.control["audit_table"]
+    def audit_table(self) -> str:  # convenience: the primary's audit table
+        return self.audit_table_for("primary")
 
     @property
     def inventory_table(self) -> str:
-        return self.control["inventory_table"]
+        return self.inventory_table_for("primary")
 
     @property
     def warehouse_id(self) -> str:
@@ -142,7 +155,7 @@ class SecretsConfig:
         for k in ("primary_bucket", "secondary_bucket", "prefix"):
             if not self.storage.get(k):
                 errors.append(f"storage.{k} is required")
-        for k in ("audit_table", "inventory_table", "catalog", "schema"):
+        for k in ("catalog", "schema"):
             if not self.control.get(k):
                 errors.append(f"control.{k} is required")
         if self.storage.get("client_side_encryption", True):
