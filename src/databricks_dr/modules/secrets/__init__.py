@@ -14,8 +14,11 @@ Design in one paragraph:
   primary-region S3 bucket.
 * **S3 Cross-Region Replication** (bidirectional) mirrors the bundle to the other
   region -- no secondary compute required in steady state.
-* **Import** runs in the PROMOTED workspace on failover: read the bundle from the
-  local-region bucket, decrypt, and re-create scopes/secrets/ACLs.
+* **Import** runs in the PROMOTED workspace on failover and is *destination-aware*:
+  it reads the bundle from the local-region bucket, reads the promoted workspace's
+  own live secrets, diffs the two, and applies **only the difference** (add / update
+  / delete / ACL). The first failover into a cold secondary is a full rebuild; later
+  failovers are incremental.
 
 Everything is SDK-only (no ``dbutils``), so the flow runs identically in a
 notebook, a Databricks job, or locally with a CLI profile.

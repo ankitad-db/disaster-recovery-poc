@@ -1,7 +1,7 @@
-"""Databricks DR framework.
+"""Databricks DR — workspace secrets.
 
-Extensible disaster-recovery for unsupported Databricks resources.
-First module: Unity Catalog models.
+Disaster recovery for Databricks workspace secrets (scopes, values, ACLs) that
+Managed DR does not cover. See ``databricks_dr.modules.secrets``.
 """
 
 __version__ = "0.1.0"

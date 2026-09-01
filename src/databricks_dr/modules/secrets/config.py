@@ -67,6 +67,20 @@ class SecretsConfig:
         return self.raw.get("detection", {})
 
     @property
+    def reconcile(self) -> Dict[str, Any]:
+        """Destination-aware import (failover) behaviour.
+
+        mode: ``mirror`` (secondary ends up == primary, incl. pruning secrets/scopes
+        that no longer exist in primary) or ``additive`` (only add/update, never
+        delete). ``prune_extra_scopes`` also removes whole scopes absent from the
+        bundle when mirroring.
+        """
+        r = dict(self.raw.get("reconcile") or {})
+        r.setdefault("mode", "mirror")
+        r.setdefault("prune_extra_scopes", False)
+        return r
+
+    @property
     def storage(self) -> Dict[str, Any]:
         return self.raw["storage"]
 

@@ -1,12 +1,6 @@
-# Core framework dependencies.
-# The replication engine is FIRST-PARTY (src/databricks_dr/common/native), built on
-# the public MLflow client + databricks-sdk -- there is no third-party engine to
-# install or keep in sync with MLflow releases.
-mlflow>=2.16
-databricks-sdk>=0.30
-PyYAML>=6.0
-click>=8.1
-
-# Seeding the POC model (01_seed_primary) trains a small sklearn model.
-# Present by default on Databricks ML runtimes; listed for off-cluster/local use.
-scikit-learn>=1.3
+# Workspace Secrets DR — runtime dependencies.
+# SDK-only design: the same code runs in a Databricks notebook, a job, or locally.
+databricks-sdk>=0.30   # Secrets API (get_secret / put_secret / ACLs), workspace client
+PyYAML>=6.0            # config/secrets_dr_config.yaml
+boto3>=1.28            # S3 bundle store + KMS data keys
+cryptography>=41       # AES-256-GCM envelope encryption of secret values

@@ -1,30 +1,28 @@
-# Databricks Asset Bundle for the DR framework.
-# Deploys the repo + scheduled DR workflows to a target workspace.
+# Databricks Asset Bundle — Workspace Secrets DR.
 #
-# Current topology (config/dr_config.yaml): primary = east (fevm-ps, us-east-2),
-# secondary = west (krish, us-west-2). Steady-state jobs run in the SECONDARY (they
-# pull from the primary), so `west` is the day-to-day deploy/run target; `east` is failback.
+# Deploys the code + jobs to a target workspace. Steady-state EXPORT runs in the
+# PRIMARY (east); the on-failover IMPORT runs in the PROMOTED workspace (west).
+# Hosts match config/secrets_dr_config.yaml.
 #
-#   databricks bundle validate -t west
-#   databricks bundle deploy   -t west       # secondary (us-west-2): steady-state DR jobs
-#   databricks bundle deploy   -t east       # primary  (us-east-2): for failback jobs
+#   databricks bundle validate -t east
+#   databricks bundle deploy   -t east        # primary (us-east-2): scheduled export
+#   databricks bundle deploy   -t west        # secondary (us-west-2): failover import job
 #
-# Go live (unpause schedules):
-#   databricks bundle deploy -t west --var cdc_pause_status=UNPAUSED
-# Run a job on demand:
-#   databricks bundle run dr_models_replicate -t west     # baseline (in secondary)
-#   databricks bundle run dr_models_cdc -t west           # one CDC+health pass
-#   databricks bundle run dr_models_failover -t west -- --action failover
+# Go live (unpause the export schedule) once a baseline export has been verified:
+#   databricks bundle deploy -t east --var export_pause_status=UNPAUSED
+#
+# Run on demand:
+#   databricks bundle run dr_secrets_export           -t east
+#   databricks bundle run dr_secrets_failover_import  -t west
 #
 # Each target maps to a CLI profile from `databricks auth login ... --profile`.
 
 bundle:
-  name: databricks-dr
+  name: databricks-secrets-dr
 
 include:
   - resources/*.yml
 
-# Synced to the workspace under /Workspace/Users/<me>/.bundle/... by default.
 sync:
   include:
     - src/**
@@ -35,35 +33,28 @@ sync:
     - requirements.txt
 
 variables:
-  cdc_schedule_cron:
-    description: Quartz cron for the incremental CDC job.
+  export_schedule_cron:
+    description: Quartz cron for the scheduled export in the primary. Tune to your RPO.
     default: "0 0/15 * * * ?"   # every 15 minutes
-  health_schedule_cron:
-    description: Quartz cron for the independent health-scan safety-net job.
-    default: "0 0 * * * ?"      # hourly
-  cdc_pause_status:
-    description: PAUSED|UNPAUSED for scheduled jobs. Override to UNPAUSED to go live.
+  export_pause_status:
+    description: PAUSED|UNPAUSED for the export schedule. Set UNPAUSED to go live.
     default: "PAUSED"
   alert_email:
-    description: Address for job failure / failover notifications.
+    description: Address for job-failure notifications.
     default: ankita.darekar@databricks.com
-  warehouse_id:
-    description: SQL warehouse id used for audit-table writes (optional).
-    default: ""
 
-# The steady-state DR jobs live in the SECONDARY (they pull from the primary). With
-# the current topology that is `west`, so it is the default day-to-day target;
-# `east` (home primary) is the failback target. Hosts match config/dr_config.yaml.
+# Primary (east) is the default day-to-day target: it runs the scheduled export.
+# Secondary (west) hosts the failover import job (triggered on promotion).
 targets:
-  west:
+  east:
     default: true
     mode: development
     workspace:
-      profile: dr-west
-      host: https://fevm-krish-dr-fevm-us-west-2.cloud.databricks.com
+      profile: dr-east
+      host: https://fe-sandbox-fe-sandbox-ps-dr-wp-us-east-2.cloud.databricks.com
 
-  east:
+  west:
     mode: development
     workspace:
-      profile: dr-east
-      host: https://fevm-fevm-ps-dr-us-east-2.cloud.databricks.com
+      profile: dr-west
+      host: https://fe-sandbox-fe-sandbox-ps-dr-wp-us-west-2.cloud.databricks.com
