@@ -1,0 +1,229 @@
+<title>DR Reconciliation Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#eef2f6; --surface:#ffffff; --surface-2:#f4f7fa; --surface-3:#e9eff5; --border:#cdd8e3;
+    --text:#0f1b26; --muted:#5a6b7b; --faint:#8496a6;
+    --accent:#0e7c8f; --accent-soft:#d3ecf1;
+    --ok:#15803d; --ok-bg:#dcfce7; --warn:#b45309; --crit:#b91c1c; --info:#6d4efc; --info-bg:#ece7ff;
+    --grid:#e4ebf1; --shadow:0 1px 2px rgba(16,30,45,.06),0 4px 16px rgba(16,30,45,.06);
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace; --sans:"IBM Plex Sans",-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --bg:#0a1017; --surface:#111a23; --surface-2:#16212d; --surface-3:#1b2836; --border:#2b3b49;
+    --text:#e7eef4; --muted:#93a6b6; --faint:#63788a;
+    --accent:#28c2e0; --accent-soft:#0e3540;
+    --ok:#3fd07f; --ok-bg:#0f2f20; --warn:#f6b23c; --crit:#f87171; --info:#a78bfa; --info-bg:#241a45;
+    --grid:#1e2b37; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 22px rgba(0,0,0,.35);
+  }}
+  :root[data-theme="dark"]{
+    --bg:#0a1017; --surface:#111a23; --surface-2:#16212d; --surface-3:#1b2836; --border:#2b3b49;
+    --text:#e7eef4; --muted:#93a6b6; --faint:#63788a;
+    --accent:#28c2e0; --accent-soft:#0e3540;
+    --ok:#3fd07f; --ok-bg:#0f2f20; --warn:#f6b23c; --crit:#f87171; --info:#a78bfa; --info-bg:#241a45;
+    --grid:#1e2b37; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 22px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14.5px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1320px;margin:0 auto;padding:22px 22px 64px}
+  .mono{font-family:var(--mono)}
+  code{font-family:var(--mono);font-size:.9em;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+  .topbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 18px;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
+  .glyph{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(150deg,var(--accent),#155e75);color:#fff;font-size:18px}
+  .topbar h1{font-size:17px;font-weight:600;letter-spacing:-.01em} .topbar .sub{font-size:12px;color:var(--muted)}
+  .toggle{margin-left:auto;border:1px solid var(--border);background:var(--surface-2);color:var(--muted);border-radius:9px;width:36px;height:36px;cursor:pointer;font-size:15px}
+  .toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:var(--shadow);margin-top:16px}
+  .diagram{overflow-x:auto}
+  svg.arch{width:100%;min-width:1080px;height:auto;display:block}
+  /* svg text theming via classes */
+  svg text{font-family:var(--mono)}
+  .zt{fill:var(--faint);font-size:12px;font-weight:600;letter-spacing:.08em}
+  .bt{fill:var(--text);font-size:12.5px;font-weight:600}
+  .bm{fill:var(--muted);font-size:11px}
+  .at{fill:var(--accent);font-size:13px;font-weight:600}
+  .flowlab{fill:var(--muted);font-size:10.5px}
+  .zone{fill:var(--surface-3);opacity:.5}
+  .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+  .box2{fill:var(--surface-2);stroke:var(--border);stroke-width:1.3}
+  .prim{stroke:var(--ok)} .sec{stroke:var(--info)} .eng{stroke:var(--accent);stroke-width:2}
+  .flowline{stroke:var(--muted);stroke-width:1.6;fill:none}
+  .replline{stroke:var(--ok);stroke-width:2.2;fill:none}
+  .num{fill:var(--accent);font-size:11px;font-weight:700}
+  .numbg{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.2}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;font-size:12px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .legend i{width:22px;border-top-width:2.4px;border-top-style:solid;display:inline-block}
+  .legend b.dsh{border-top-style:dashed}
+  .flowkey{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 22px;margin-top:16px}
+  @media(max-width:820px){.flowkey{grid-template-columns:1fr}}
+  .flowkey .k{display:flex;gap:10px;align-items:flex-start;font-size:12.5px}
+  .flowkey .b{min-width:22px;height:22px;border-radius:6px;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent);font-family:var(--mono);font-weight:700;font-size:12px;display:grid;place-items:center}
+  .flowkey .b.g{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+  .flowkey .t b{font-weight:600} .flowkey .t span{color:var(--muted)}
+  .foot{margin-top:24px;font-size:12px;color:var(--faint);text-align:center;line-height:1.6}
+</style>
+
+<div class="wrap">
+  <div class="topbar">
+    <div class="glyph">🗺️</div>
+    <div><h1>DR Reconciliation — Detailed Architecture</h1>
+      <div class="sub">Recon engine + AI/BI dashboard over Databricks Managed DR · AWS · two-region</div></div>
+    <button class="toggle" id="themeBtn" title="Toggle theme" aria-label="Toggle light/dark theme">◐</button>
+  </div>
+
+  <div class="card diagram">
+    <svg class="arch" viewBox="0 0 1260 860" role="img" aria-label="Detailed DR reconciliation architecture diagram">
+      <defs>
+        <marker id="a" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+        <marker id="ag" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ok)"/></marker>
+      </defs>
+
+      <!-- ===== ACCOUNT / CONTROL PLANE band ===== -->
+      <rect class="box2" x="400" y="24" width="460" height="66" rx="11"/>
+      <text class="zt" x="416" y="44">ACCOUNT · CONTROL PLANE</text>
+      <text class="bt" x="416" y="63">Managed DR failover group  ·  state ACTIVE</text>
+      <text class="bm" x="416" y="80">system.replication.states  ·  DR REST API  →  scope · RPO lag · errors[]</text>
+
+      <!-- ===== PRIMARY REGION zone ===== -->
+      <rect class="zone" x="24" y="150" width="340" height="612" rx="16"/>
+      <rect x="24" y="150" width="340" height="612" rx="16" fill="none" stroke="var(--ok)" stroke-width="1.4"/>
+      <text class="zt" x="44" y="176">PRIMARY REGION · us-east-2</text>
+      <rect class="box prim" x="44" y="190" width="300" height="52" rx="10"/>
+      <text class="bt" x="60" y="214">PRIMARY workspace · dr-prod-east</text>
+      <text class="bm" x="60" y="231">WRITABLE · source of truth</text>
+      <!-- primary sources -->
+      <text class="zt" x="44" y="272" font-size="11">SOURCES (read for primary_sig)</text>
+      <rect class="box2" x="44" y="282" width="300" height="42" rx="9"/>
+      <text class="bt" x="58" y="300" font-size="11.5">information_schema</text>
+      <text class="bm" x="58" y="316">tables·columns·views·routines·*_privileges</text>
+      <rect class="box2" x="44" y="330" width="300" height="42" rx="9"/>
+      <text class="bt" x="58" y="348" font-size="11.5">DESCRIBE DETAIL / HISTORY</text>
+      <text class="bm" x="58" y="364">version · rows · numFiles · size · schema</text>
+      <rect class="box2" x="44" y="378" width="300" height="42" rx="9"/>
+      <text class="bt" x="58" y="396" font-size="11.5">Jobs · Warehouses · Clusters API</text>
+      <text class="bm" x="58" y="412">defs · schedules · configs · state</text>
+      <rect class="box2" x="44" y="426" width="300" height="42" rx="9"/>
+      <text class="bt" x="58" y="444" font-size="11.5">Workspace · permissions API</text>
+      <text class="bm" x="58" y="460">notebooks · files · folders · ACLs</text>
+      <rect class="box2" x="44" y="474" width="300" height="42" rx="9"/>
+      <text class="bt" x="58" y="492" font-size="11.5">Lakeview API</text>
+      <text class="bm" x="58" y="508">draft AI/BI dashboards</text>
+      <text class="bm" x="44" y="540" font-size="10.5">object types 1–10 · workspace assets + Unity Catalog</text>
+
+      <!-- ===== SECONDARY REGION zone ===== -->
+      <rect class="zone" x="896" y="150" width="340" height="612" rx="16"/>
+      <rect x="896" y="150" width="340" height="612" rx="16" fill="none" stroke="var(--info)" stroke-width="1.4"/>
+      <text class="zt" x="916" y="176">SECONDARY REGION · us-west-2</text>
+      <rect class="box sec" x="916" y="190" width="300" height="52" rx="10"/>
+      <text class="bt" x="932" y="214">SECONDARY workspace · dr-prod-west</text>
+      <text class="bm" x="932" y="231">READ-ONLY replica · no compute</text>
+      <rect class="box sec" x="916" y="258" width="300" height="60" rx="10" stroke-dasharray="6 4"/>
+      <text class="bt" x="932" y="282">MONITOR workspace (read-only)</text>
+      <text class="bm" x="932" y="299">secondary region · bound to west-metastore</text>
+      <text class="bm" x="932" y="313">runs all secondary-side reads</text>
+      <text class="zt" x="916" y="348" font-size="11">SOURCES (read for secondary_sig)</text>
+      <rect class="box2" x="916" y="358" width="300" height="158" rx="10"/>
+      <text class="bm" x="932" y="380" font-size="11.5">same reads as primary, via MONITOR:</text>
+      <text class="bm" x="932" y="402">· information_schema (secondary metastore)</text>
+      <text class="bm" x="932" y="422">· DESCRIBE DETAIL / HISTORY</text>
+      <text class="bm" x="932" y="442">· Jobs · Warehouses · Clusters API</text>
+      <text class="bm" x="932" y="462">· Workspace · permissions API</text>
+      <text class="bm" x="932" y="482">· Lakeview API (drafts)</text>
+      <text class="bm" x="932" y="504" font-size="10.5">read-only — writes rejected until promotion</text>
+
+      <!-- ===== Managed DR replication link (primary workspace <-> secondary workspace) ===== -->
+      <path class="replline" d="M194,190 L194,124 L1066,124 L1066,190" marker-end="url(#ag)" marker-start="url(#ag)"/>
+      <rect x="470" y="108" width="320" height="34" rx="9" fill="var(--ok-bg)" stroke="var(--ok)" stroke-width="1.2"/>
+      <text x="630" y="129" text-anchor="middle" font-size="10.5" fill="var(--ok)" font-weight="600">Managed DR · continuous replication — failover/failback reverses</text>
+
+      <!-- ===== RECON ENGINE ===== -->
+      <rect class="box eng" x="424" y="168" width="412" height="300" rx="13"/>
+      <text class="at" x="630" y="192" text-anchor="middle">RECON ENGINE · scheduled serverless job</text>
+      <text class="bm" x="630" y="208" text-anchor="middle">primary or neutral workspace · runs as DR service principal</text>
+      <!-- modules -->
+      <rect class="box2" x="446" y="220" width="368" height="34" rx="8"/><text class="bt" x="462" y="242" font-size="11.5">Scope Resolver</text><text class="bm" x="700" y="242" font-size="10.5">→ catalogs · ws-sets · RPO target · errors[]</text>
+      <rect class="box2" x="446" y="260" width="368" height="34" rx="8"/><text class="bt" x="462" y="282" font-size="11.5">Primary Reader</text><text class="bm" x="700" y="282" font-size="10.5">fan-out ×10 object readers</text>
+      <rect class="box2" x="446" y="300" width="368" height="34" rx="8"/><text class="bt" x="462" y="322" font-size="11.5">Secondary Reader</text><text class="bm" x="700" y="322" font-size="10.5">same readers, via monitor WS</text>
+      <rect class="box2" x="446" y="340" width="368" height="34" rx="8"/><text class="bt" x="462" y="362" font-size="11.5">Differ</text><text class="bm" x="700" y="362" font-size="10.5">signature compare per object</text>
+      <rect class="box2" x="446" y="380" width="368" height="34" rx="8"/><text class="bt" x="462" y="402" font-size="11.5">Classifier</text><text class="bm" x="700" y="402" font-size="10.5">status + severity + readiness</text>
+      <rect class="box2" x="446" y="420" width="368" height="34" rx="8"/><text class="bt" x="462" y="442" font-size="11.5">Control Writer</text><text class="bm" x="700" y="442" font-size="10.5">idempotent MERGE per run_id</text>
+      <!-- internal flow arrows between modules -->
+      <line class="flowline" x1="630" y1="254" x2="630" y2="260" marker-end="url(#a)"/>
+      <line class="flowline" x1="630" y1="294" x2="630" y2="300" marker-end="url(#a)"/>
+      <line class="flowline" x1="630" y1="334" x2="630" y2="340" marker-end="url(#a)"/>
+      <line class="flowline" x1="630" y1="374" x2="630" y2="380" marker-end="url(#a)"/>
+      <line class="flowline" x1="630" y1="414" x2="630" y2="420" marker-end="url(#a)"/>
+
+      <!-- ===== CONTROL TABLES ===== -->
+      <rect class="box" x="424" y="506" width="412" height="96" rx="13"/>
+      <text class="at" x="630" y="528" text-anchor="middle" font-size="12.5">dr_recon_* control tables · Delta (dr_poc.dr_control)</text>
+      <text class="bm" x="446" y="550" font-size="11">dr_recon_runs</text><text class="bm" x="640" y="550" font-size="11">dr_recon_coverage</text>
+      <text class="bm" x="446" y="570" font-size="11">dr_recon_inventory</text><text class="bm" x="640" y="570" font-size="11">dr_recon_findings</text>
+      <text class="bm" x="446" y="590" font-size="10.5">run summary · (type×status) rollup · per-object detail · findings</text>
+
+      <!-- ===== DASHBOARD ===== -->
+      <rect class="box eng" x="424" y="638" width="412" height="120" rx="13"/>
+      <text class="at" x="630" y="660" text-anchor="middle">AI/BI Dashboard · reads dr_recon_* only</text>
+      <text class="bm" x="630" y="679" text-anchor="middle" font-size="10.5">decoupled from Managed-DR enrollment</text>
+      <text class="bm" x="446" y="700" font-size="10.5">· readiness (RAG) · RPO / RTO KPIs</text>
+      <text class="bm" x="446" y="717" font-size="10.5">· coverage scorecard (10 objects)</text>
+      <text class="bm" x="446" y="734" font-size="10.5">· failover/failback history + recon</text>
+      <text class="bm" x="646" y="700" font-size="10.5">· RPO trend · blocking errors</text>
+      <text class="bm" x="646" y="717" font-size="10.5">· silent-gap detector</text>
+      <text class="bm" x="646" y="734" font-size="10.5">· per-object drill-down · checklist</text>
+
+      <!-- ===== external flow arrows + numbers ===== -->
+      <!-- 1 account -> scope resolver -->
+      <line class="flowline" x1="630" y1="90" x2="630" y2="168" marker-end="url(#a)"/>
+      <circle class="numbg" cx="648" cy="150" r="11"/><text class="num" x="648" y="154" text-anchor="middle">1</text>
+      <!-- 2 primary sources -> primary reader -->
+      <path class="flowline" d="M344,398 C400,398 404,277 446,277" marker-end="url(#a)"/>
+      <circle class="numbg" cx="404" cy="333" r="11"/><text class="num" x="404" y="337" text-anchor="middle">2</text>
+      <!-- 3 secondary/monitor -> secondary reader -->
+      <path class="flowline" d="M916,317 C860,317 856,317 814,317" marker-end="url(#a)"/>
+      <circle class="numbg" cx="866" cy="317" r="11"/><text class="num" x="866" y="321" text-anchor="middle">3</text>
+      <!-- 5 writer -> control tables -->
+      <line class="flowline" x1="630" y1="468" x2="630" y2="506" marker-end="url(#a)"/>
+      <circle class="numbg" cx="648" cy="488" r="11"/><text class="num" x="648" y="492" text-anchor="middle">5</text>
+      <text class="flowlab" x="662" y="491">MERGE</text>
+      <!-- 6 control tables -> dashboard -->
+      <line class="flowline" x1="630" y1="602" x2="630" y2="638" marker-end="url(#a)"/>
+      <circle class="numbg" cx="648" cy="620" r="11"/><text class="num" x="648" y="624" text-anchor="middle">6</text>
+      <text class="flowlab" x="662" y="623">SQL warehouse</text>
+      <!-- 4 label inside engine (diff/classify) -->
+      <circle class="numbg" cx="424" cy="357" r="11"/><text class="num" x="424" y="361" text-anchor="middle">4</text>
+    </svg>
+
+    <div class="legend">
+      <span><i style="border-color:var(--ok)"></i> primary region (writable)</span>
+      <span><i style="border-color:var(--info)"></i> secondary region (read-only)</span>
+      <span><i style="border-color:var(--accent)"></i> recon engine &amp; dashboard</span>
+      <span><i class="dsh" style="border-color:var(--info);border-top-style:dashed"></i> monitor workspace</span>
+      <span><i style="border-color:var(--ok)"></i> Managed DR replication</span>
+    </div>
+
+    <div class="flowkey">
+      <div class="k"><div class="b">1</div><div class="t"><b>Resolve scope</b><br><span>DR REST API + <code>system.replication.states</code> → in-scope catalogs, workspace sets, RPO target, blocking errors.</span></div></div>
+      <div class="k"><div class="b">2</div><div class="t"><b>Read primary</b><br><span>Primary-side signature for every in-scope object of the 10 types.</span></div></div>
+      <div class="k"><div class="b">3</div><div class="t"><b>Read secondary</b><br><span>Same reads against the read-only secondary via the monitor workspace.</span></div></div>
+      <div class="k"><div class="b">4</div><div class="t"><b>Diff &amp; classify</b><br><span>Compare signatures; fold in DR errors + silent-gap set → status + severity + readiness.</span></div></div>
+      <div class="k"><div class="b">5</div><div class="t"><b>Persist</b><br><span>Idempotent MERGE into the four <code>dr_recon_*</code> tables.</span></div></div>
+      <div class="k"><div class="b">6</div><div class="t"><b>Publish</b><br><span>AI/BI dashboard reads the tables via a SQL warehouse; alerts fire on regression.</span></div></div>
+      <div class="k"><div class="b g">↺</div><div class="t"><b>Failover / failback</b><br><span>Direction is read from <code>effective_primary_region</code>; the engine reconciles whichever region is primary, and logs each DR event + post-event reconciliation.</span></div></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    Detailed architecture for the DR reconciliation report · pairs with the build spec (<code>dr_reconciliation_design.html</code>),
+    the sample dashboard (<code>dr_reconciliation_dashboard.html</code>), and the research/gap analysis.
+  </div>
+</div>
+<script>
+  const root=document.documentElement;
+  document.getElementById('themeBtn').addEventListener('click',()=>{
+    const dark=root.getAttribute('data-theme')==='dark'||(!root.getAttribute('data-theme')&&matchMedia('(prefers-color-scheme:dark)').matches);
+    root.setAttribute('data-theme',dark?'light':'dark');});
+</script>

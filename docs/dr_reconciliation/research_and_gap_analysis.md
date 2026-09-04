@@ -230,6 +230,7 @@ shareable reconciliation report** — the piece Managed DR does not provide.
 | `research_and_gap_analysis.md` | This doc — research, gaps, top-10 objects, per-object signals, architecture. |
 | `dr_reconciliation_dashboard.html` | **Sample dashboard** — extensive, interactive mockup of how the report looks (workspace identity, DR-event history, scorecard, RPO, errors, 10-object drill-down, readiness checklist). The visual spec for the AI/BI build. |
 | `dr_reconciliation_design.html` | **Architecture & build spec** — implementation-grade: system context, end-to-end pipeline, per-object recon contract (source → signature → diff → status), classifier, control-table schemas, failover/failback behavior, runtime/permissions, build plan. Written so a developer agent can build from it. |
+| `dr_reconciliation_arch_diagram.html` | **Detailed architecture diagram** — large inline-SVG: two regions, account/control-plane, recon-engine internals (scope resolver → readers → differ → classifier → writer), control tables, dashboard, Managed-DR replication link, and the numbered end-to-end flow (1–6 + failover/failback). |
 | `dr_reconciliation_architecture.excalidraw` | High-level editable architecture diagram. |
 | `../../sql/dr_recon_tables.sql` | DDL for the four `dr_recon_*` control tables the dashboard reads. |
 
