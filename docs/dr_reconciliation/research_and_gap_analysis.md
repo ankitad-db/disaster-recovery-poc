@@ -125,20 +125,27 @@ The recon engine runs in the **primary (or a neutral) workspace**, reads the **s
 cross-workspace client / the read-only monitor workspace, diffs per object type, and writes results
 to **recon control tables** feeding an **AI/BI dashboard**.
 
-## 6. Top 5 objects to reconcile (all Managed-DR-supported, ranked by importance)
+## 6. Top 10 objects to reconcile — workspace assets prioritized (all Managed-DR-supported)
 
-Chosen for (a) Managed-DR support, (b) blast radius if drifted, (c) a concrete, computable parity signal.
+Ranked for (a) Managed-DR support, (b) blast radius if drifted, (c) a concrete, computable parity
+signal. **Workspace assets are the priority tier (ranks 1–7)** — they are what makes the promoted
+workspace *operable* the moment you fail over — followed by the Unity Catalog tier (8–10).
 
-| # | Object | Why it matters | Recon signal (primary vs secondary) | Source |
-|---|---|---|---|---|
-| **1** | **UC managed tables** (data + metadata) | The crown jewel; silent data drift = wrong results after failover | existence · **commit version** · **row count** (or per-partition count) · `numFiles`/`sizeInBytes` · **schema hash** · replication lag | `information_schema.tables/columns`, `DESCRIBE DETAIL/HISTORY`, `system.replication.states` |
-| **2** | **UC grants & ownership** | Security: drift = broken access or over-broad access after failover | grant set per securable (principal, privilege) · **owner** parity · isolation mode | `information_schema.*_privileges`, `SHOW GRANTS`, Catalog Explorer owner |
-| **3** | **UC views & functions** | Consumption layer; a missing/definition-drifted view breaks dashboards & apps; cross-catalog views need owner perms in secondary | existence · **definition (DDL) hash** · view-owner privileges on referenced objects | `information_schema.views/routines`, `SHOW CREATE`, error class `DR_..CROSS_CATALOG_VIEW_PERMISSION` |
-| **4** | **Jobs / workflows** | Operational recovery; jobs replicate but **schedules are paused** in secondary — must confirm definition parity + intended schedule | existence · definition/tasks parity · **schedule present & paused** · owner/ACL | `system.lakeflow.jobs`, Jobs API, permissions API |
-| **5** | **Notebooks & workspace files (+ ACLs)** | The code assets; presence + ACL parity so the promoted workspace is usable by the right people | inventory count/paths · content hash (optional) · **ACL parity** | Workspace API (`list`/`export`), permissions API |
+| # | Tier | Object | Why it matters | Recon signal (primary vs secondary) | Source |
+|---|---|---|---|---|---|
+| **1** | WS | **Notebooks** | The code that runs everything; matched exactly by the **preserved asset ID** across regions | presence (by asset id + path) · **content hash** · language | Workspace API (`list`/`export`) |
+| **2** | WS | **Jobs / workflows** | Operational recovery; jobs replicate but **schedules are paused** in the secondary | definition/tasks/libs/params parity · **schedule present & PAUSED** · run-as/owner · job ACLs · referenced assets exist | `system.lakeflow.jobs`, Jobs API, permissions API |
+| **3** | WS | **SQL warehouses** | Serving/BI compute; expected to arrive **`STOPPED`** | config parity (size, type, channel, auto-stop, tags) · **state = STOPPED** · permissions | Warehouses API, permissions API |
+| **4** | WS | **Clusters** | Job/interactive compute; expected **`TERMINATED`** | config parity (policy, node types, DBR, init scripts, libraries) · **state = TERMINATED** · permissions | Clusters API, permissions API |
+| **5** | WS | **Draft AI/BI dashboards** | Analyst-facing; **only drafts replicate — published do NOT** | presence · **spec/definition hash** · referenced datasets resolvable · flag published-only | Lakeview API |
+| **6** | WS | **Files & folders** | Repos/workspace files backing notebooks & apps | inventory (by asset id + path) · **content hash** · folder structure | Workspace API |
+| **7** | WS | **Workspace ACLs** | Least-privilege after failover — assets are useless (or over-exposed) with wrong ACLs | per-asset **`(principal, permission_level)` set** diff across notebooks/jobs/warehouses/clusters/dashboards/folders | permissions API |
+| **8** | UC | **Managed tables** (data + metadata) | The data crown jewel; silent drift = wrong results after failover | existence · **commit version** · **row count** · `numFiles`/`sizeInBytes` · **schema hash** · lag | `information_schema.tables/columns`, `DESCRIBE DETAIL/HISTORY`, `system.replication.states` |
+| **9** | UC | **Grants & ownership** | Security: drift = broken or over-broad access | `(principal, privilege)` set per securable · **owner** parity · isolation mode | `information_schema.*_privileges`, `SHOW GRANTS` |
+| **10** | UC | **Views & functions** | Consumption layer; cross-catalog views need owner perms in the secondary | existence · **DDL hash** · view-owner privileges on referenced objects | `information_schema.views/routines`, `SHOW CREATE` |
 
-**Tier-2 (supported, lower priority):** external tables & volumes (**metadata**-only parity),
-SQL warehouses & clusters (config parity, expected `STOPPED`/`TERMINATED`), draft AI/BI dashboards.
+**Tier-2 (supported, lower priority):** external tables & external volumes (**metadata**-only parity;
+volume *data* is not replicated), catalog isolation-mode/workspace bindings.
 
 ### 6.1 What we track & showcase per object (the metrics)
 
@@ -147,63 +154,87 @@ Every object gets a **status** — `IN_SYNC` · `LAGGING` (copied but behind RPO
 error) · `UNSUPPORTED-in-scope` (in scope but silently unreplicable) — plus **severity** and
 **first_seen**. The specific signals per object type:
 
-**1. UC managed tables** — the data-fidelity core:
-- *Coverage:* in the failover-group scope? present in the secondary metastore?
-- *Freshness / RPO:* group `replication_lag_ms` + per-table **last commit timestamp** (`DESCRIBE HISTORY`) primary vs secondary.
-- *Data fidelity:* **Delta commit version**, **row count** (total, or per-partition for large tables), **`numFiles`** + **`sizeInBytes`** (`DESCRIBE DETAIL`); optional **per-partition checksum** for a canary set.
-- *Schema parity:* column names/types/order **schema hash** (`information_schema.columns`), partition columns, table properties, and table features (CDF, deletion vectors).
-- *Replicability blockers:* **row filters / column masks / ABAC** tags → these fail Managed DR; surface as `FAILED` with the reason.
-- *Governance:* **owner** parity + catalog **isolation mode** (open vs isolated/bound).
-- **Showcased:** version drift, row-count Δ, size Δ, schema diff, lag vs target.
+**Workspace-asset tier (priority):**
 
-**2. UC grants & ownership** — security parity:
-- *Grant set* per securable = set of `(principal, privilege)` from `information_schema.table_privileges` /
-  `schema_privileges` / `catalog_privileges` / `routine_privileges`, **primary vs secondary** → **added / removed** grants.
-- *Owner* parity per securable (Managed DR falls back to the DR service principal if the primary owner was deleted — flag it).
-- *Isolation mode / workspace binding* parity.
-- **Showcased:** `+/- principal × privilege` diff, owner changes, count of privilege drifts (**high severity** — security).
+**1. Notebooks** — inventory matched by the **preserved workspace asset ID** (not just path, so a
+move is not mistaken for a delete) + path; **content hash** (export + hash) for drift; language.
+*Showcased:* missing/extra notebooks, content drift, path moves.
 
-**3. UC views & functions** — consumption-layer integrity:
-- *Presence* + **definition (DDL) hash** (`information_schema.views.view_definition`, `routines.routine_definition`, `SHOW CREATE`).
-- *Dependency resolvability in the secondary* — especially **cross-catalog views**, whose owner must hold `USE CATALOG`/`USE SCHEMA`/`SELECT` on referenced objects in the secondary (`DR_INVALID_CONFIGURATION.CROSS_CATALOG_VIEW_PERMISSION`).
-- **Showcased:** DDL diff, missing-dependency reason, invalid-view flag.
+**2. Jobs / workflows** — **definition parity** (tasks, job clusters, libraries, parameters) from
+`system.lakeflow.jobs`/Jobs API; **schedule present AND `PAUSED`** in the secondary (flag missing or
+**unexpectedly active**); run-as/owner + **job ACLs**; referenced notebooks/clusters exist.
+*Showcased:* definition diff, schedule state, missing job, ACL diff.
 
-**4. Jobs / workflows** — operational recovery:
-- *Presence* + **definition parity** (tasks, job clusters, libraries, params) from `system.lakeflow.jobs` / Jobs API.
-- *Schedule state:* schedule **present AND `PAUSED`** in the secondary (Managed DR pauses secondary schedules) — flag missing or **unexpectedly active** schedules.
-- *Run-as / owner / job ACLs* parity; **referenced assets exist** (notebook paths, clusters).
-- **Showcased:** definition diff, schedule state, missing job, ACL diff.
+**3. SQL warehouses** — config parity (cluster size, type, channel, auto-stop, tags); **state expected
+`STOPPED`**; permissions. *Showcased:* config drift, unexpected state, permission diff.
 
-**5. Notebooks & workspace files (+ ACLs)** — code assets:
-- *Inventory parity* by path/count (Workspace API). Managed DR **preserves workspace asset IDs** across regions — leverage the ID to match objects exactly (not just by path).
-- *Content* hash (optional; export + hash for critical notebooks).
-- *ACL parity* = set of `(principal, permission_level)` from the permissions API, primary vs secondary.
-- **Showcased:** missing/extra files, content drift, ACL diff.
+**4. Clusters** — config parity (policy, node types, DBR version, init scripts, libraries,
+autoscaling); **state expected `TERMINATED`**; permissions. *Showcased:* config drift, unexpected
+running state, permission diff.
+
+**5. Draft AI/BI dashboards** — presence + **spec/definition hash**; referenced datasets/warehouse
+resolvable in the secondary; explicitly flag **published dashboards** (not replicated — drafts only).
+*Showcased:* missing draft, spec drift, published-only warning.
+
+**6. Files & folders** — inventory (asset id + path) + **content hash**; folder-structure parity.
+*Showcased:* missing/extra files, content drift.
+
+**7. Workspace ACLs** — per-asset **`(principal, permission_level)` set** across all the above assets,
+primary vs secondary → **added/removed** grants. *Showcased:* `+/- principal × permission` diff
+(**high severity** — security/operability).
+
+**Unity Catalog tier:**
+
+**8. Managed tables** — group `replication_lag_ms` + per-table **last commit** (`DESCRIBE HISTORY`);
+**commit version**, **row count** (or per-partition), **`numFiles`**/**`sizeInBytes`**
+(`DESCRIBE DETAIL`); **schema hash** (`information_schema.columns`), partition cols, table features;
+**row filters/column masks/ABAC** → `FAILED`; **owner** + isolation mode. *Showcased:* version/row/size/schema drift, lag vs target.
+
+**9. Grants & ownership** — `(principal, privilege)` set per securable from
+`information_schema.*_privileges`, primary vs secondary → **added/removed**; **owner** parity (flag
+fallback to the DR service principal); isolation-mode/binding. *Showcased:* privilege diff, owner change.
+
+**10. Views & functions** — presence + **DDL hash** (`information_schema.views`/`routines`,
+`SHOW CREATE`); **cross-catalog** dependency resolvability (owner needs `USE CATALOG`/`USE SCHEMA`/
+`SELECT` on referenced objects in the secondary — `DR_INVALID_CONFIGURATION.CROSS_CATALOG_VIEW_PERMISSION`).
+*Showcased:* DDL diff, missing-dependency/invalid-view flag.
 
 **Cross-cutting (all objects):** last-reconciled time, the raw primary/secondary signature pair
 (for evidence/audit), and a link back to the blocking `error_class` from `system.replication.states`
 when one applies. This is what makes the report **audit-ready** for DR-test sign-off.
 
-## 7. Proposed architecture (what the dashboard is)
-
-Depicted in **`dr_reconciliation_architecture.excalidraw`**. In one paragraph:
+## 7. Proposed architecture (what we're building)
 
 - A scheduled **recon job** runs in a **primary/neutral workspace**. It (1) pulls **expected scope**
   from the DR API + `system.replication.states`, (2) reads the **primary** object inventory + parity
   signals from `information_schema` / Delta metadata / Jobs & Workspace APIs, (3) reads the **secondary**
-  the same way via the **read-only monitor workspace**, (4) **diffs per object type** for the top-5
+  the same way via the **read-only monitor workspace**, (4) **diffs per object type** for the top-10
   objects → classifies each object `IN_SYNC` / `LAGGING` / `DRIFTED` / `MISSING` / `FAILED` /
-  `UNSUPPORTED-in-scope`, and (5) writes to **recon tables** (`dr_recon_inventory`,
-  `dr_recon_findings`, `dr_recon_runs`).
-- An **AI/BI dashboard** reads those tables + `system.replication.states` and presents: a **coverage
-  scorecard** (per object type: in-sync / drifted / missing / failed / unsupported), an **RPO trend**
-  (from `replication_lag_ms`), a **blocking-errors** panel (by `error_class` + affected asset type),
-  a **per-object drill-down** (table version/row/schema drift; grant diffs; view DDL diffs; job
-  schedule state; notebook/ACL parity), and a **failover-readiness** headline (green only when scope
-  is fully covered and lag < RPO target).
+  `UNSUPPORTED-in-scope`, and (5) writes to **recon control tables**
+  (`dr_recon_runs`, `dr_recon_coverage`, `dr_recon_inventory`, `dr_recon_findings` — DDL in
+  [`sql/dr_recon_tables.sql`](../../sql/dr_recon_tables.sql)).
+- The **AI/BI dashboard reads ONLY the `dr_recon_*` tables** (the engine folds `replication_lag_ms`
+  + `errors[]` into them), so the dashboard is decoupled from Managed-DR enrollment. It presents:
+  workspace/failover-group **identity**, a **failover-readiness** headline (RAG), **RPO/RTO**,
+  **failover/failback history + reconciliation**, a **coverage scorecard** across the top-10
+  (workspace assets first), an **RPO trend**, **blocking errors** + a **silent-gap detector**, a
+  **per-object drill-down**, and a **pre-failover readiness checklist**.
 
 This turns Managed DR's coarse "pipeline is healthy, lag = N" into an **object-level, auditable,
 shareable reconciliation report** — the piece Managed DR does not provide.
+
+### 7.1 Deliverables in this folder
+
+| File | Role |
+|---|---|
+| `research_and_gap_analysis.md` | This doc — research, gaps, top-10 objects, per-object signals, architecture. |
+| `dr_reconciliation_dashboard.html` | **Sample dashboard** — extensive, interactive mockup of how the report looks (workspace identity, DR-event history, scorecard, RPO, errors, 10-object drill-down, readiness checklist). The visual spec for the AI/BI build. |
+| `dr_reconciliation_design.html` | **Architecture & build spec** — implementation-grade: system context, end-to-end pipeline, per-object recon contract (source → signature → diff → status), classifier, control-table schemas, failover/failback behavior, runtime/permissions, build plan. Written so a developer agent can build from it. |
+| `dr_reconciliation_architecture.excalidraw` | High-level editable architecture diagram. |
+| `../../sql/dr_recon_tables.sql` | DDL for the four `dr_recon_*` control tables the dashboard reads. |
+
+> **Productionization:** the live report is a **Databricks AI/BI (Lakeview) dashboard** over the
+> `dr_recon_*` tables; the HTML is the sample/visual spec, not the runtime.
 
 ## 8. Open questions / assumptions
 
