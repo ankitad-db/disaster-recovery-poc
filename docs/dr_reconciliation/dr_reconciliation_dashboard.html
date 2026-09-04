@@ -1,0 +1,372 @@
+<title>DR Reconciliation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#eef2f6; --surface:#ffffff; --surface-2:#f4f7fa; --border:#d6dfe8;
+    --text:#0f1b26; --muted:#5a6b7b; --faint:#8496a6;
+    --accent:#0e7c8f; --accent-soft:#d3ecf1;
+    --ok:#15803d; --ok-bg:#dcfce7; --warn:#b45309; --warn-bg:#fdeccf;
+    --crit:#b91c1c; --crit-bg:#fbe0e0; --info:#6d4efc; --info-bg:#e7e1ff;
+    --idle:#64748b; --idle-bg:#e6ebf1;
+    --grid:#e4ebf1; --shadow:0 1px 2px rgba(16,30,45,.06),0 4px 16px rgba(16,30,45,.06);
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+    --sans:"IBM Plex Sans",-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --bg:#0a1017; --surface:#111a23; --surface-2:#16212d; --border:#243441;
+    --text:#e7eef4; --muted:#93a6b6; --faint:#63788a;
+    --accent:#28c2e0; --accent-soft:#0e3540;
+    --ok:#3fd07f; --ok-bg:#0f2f20; --warn:#f6b23c; --warn-bg:#3a2a10;
+    --crit:#f87171; --crit-bg:#3a1717; --info:#a78bfa; --info-bg:#241a45;
+    --idle:#7e93a5; --idle-bg:#1b2732;
+    --grid:#1e2b37; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 22px rgba(0,0,0,.35);
+  }}
+  :root[data-theme="dark"]{
+    --bg:#0a1017; --surface:#111a23; --surface-2:#16212d; --border:#243441;
+    --text:#e7eef4; --muted:#93a6b6; --faint:#63788a;
+    --accent:#28c2e0; --accent-soft:#0e3540;
+    --ok:#3fd07f; --ok-bg:#0f2f20; --warn:#f6b23c; --warn-bg:#3a2a10;
+    --crit:#f87171; --crit-bg:#3a1717; --info:#a78bfa; --info-bg:#241a45;
+    --idle:#7e93a5; --idle-bg:#1b2732;
+    --grid:#1e2b37; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 22px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+    font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1220px;margin:0 auto;padding:22px 22px 60px}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+  h1,h2,h3{text-wrap:balance;margin:0}
+  a{color:var(--accent)}
+
+  /* top bar */
+  .topbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+    padding:14px 18px;background:var(--surface);border:1px solid var(--border);
+    border-radius:14px;box-shadow:var(--shadow)}
+  .brand{display:flex;align-items:center;gap:11px;margin-right:auto}
+  .brand .glyph{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    background:linear-gradient(150deg,var(--accent),#155e75);color:#fff;font-size:18px}
+  .brand h1{font-size:17px;font-weight:600;letter-spacing:-.01em}
+  .brand .sub{font-size:12px;color:var(--muted)}
+  .selector{font-family:var(--mono);font-size:12.5px;color:var(--text);background:var(--surface-2);
+    border:1px solid var(--border);border-radius:9px;padding:7px 11px}
+  .meta{font-size:12px;color:var(--muted);text-align:right;line-height:1.35}
+  .toggle{border:1px solid var(--border);background:var(--surface-2);color:var(--muted);
+    border-radius:9px;width:36px;height:36px;cursor:pointer;font-size:15px}
+  .toggle:hover{color:var(--text)}
+
+  /* readiness pill */
+  .pill{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-weight:600;
+    font-size:12.5px;padding:6px 12px;border-radius:999px;letter-spacing:.02em}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none;box-shadow:0 0 0 3px color-mix(in srgb,currentColor 18%,transparent)}
+  .s-ok{color:var(--ok);background:var(--ok-bg)} .s-warn{color:var(--warn);background:var(--warn-bg)}
+  .s-crit{color:var(--crit);background:var(--crit-bg)} .s-info{color:var(--info);background:var(--info-bg)}
+  .s-idle{color:var(--idle);background:var(--idle-bg)}
+
+  section{margin-top:20px}
+  .sechead{display:flex;align-items:baseline;gap:12px;margin:0 2px 11px}
+  .sechead h2{font-size:14px;font-weight:600;letter-spacing:.01em}
+  .sechead .note{font-size:12px;color:var(--muted)}
+
+  .grid{display:grid;gap:14px}
+  .kpis{grid-template-columns:repeat(4,1fr)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    padding:16px 17px;box-shadow:var(--shadow)}
+  .kpi .label{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  .kpi .big{font-family:var(--mono);font-size:30px;font-weight:600;letter-spacing:-.02em;margin-top:8px;line-height:1}
+  .kpi .big small{font-size:15px;color:var(--muted);font-weight:500}
+  .kpi .foot{font-size:12px;color:var(--muted);margin-top:9px}
+  .accent-rail{border-top:3px solid var(--accent)}
+
+  .two{grid-template-columns:1.4fr 1fr}
+  .cols{grid-template-columns:1fr 1fr}
+  @media(max-width:900px){.kpis,.two,.cols{grid-template-columns:1fr}}
+
+  /* scorecard bars */
+  .score-row{display:grid;grid-template-columns:132px 1fr 92px;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--grid)}
+  .score-row:first-of-type{border-top:0}
+  .score-row .name{font-weight:500}
+  .score-row .name span{display:block;font-size:11.5px;color:var(--faint);font-family:var(--mono)}
+  .bar{display:flex;height:16px;border-radius:5px;overflow:hidden;background:var(--surface-2)}
+  .bar i{display:block}
+  .b-ok{background:var(--ok)} .b-warn{background:var(--warn)} .b-crit{background:var(--crit)} .b-info{background:var(--info)}
+  .pct{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
+  .pct small{color:var(--faint)}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:10px;height:10px;border-radius:3px;display:inline-block}
+
+  /* sparkline */
+  .spark-head{display:flex;justify-content:space-between;align-items:flex-end}
+  .spark-val{font-family:var(--mono);font-size:26px;font-weight:600;line-height:1}
+  svg{display:block;width:100%;height:auto}
+
+  /* errors */
+  .err{display:flex;align-items:center;gap:11px;padding:10px 0;border-top:1px solid var(--grid)}
+  .err:first-of-type{border-top:0}
+  .err .cls{font-family:var(--mono);font-size:12.5px;font-weight:500}
+  .err .msg{font-size:12px;color:var(--muted)}
+  .count{margin-left:auto;font-family:var(--mono);font-weight:600;font-size:13px;
+    background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:3px 9px;white-space:nowrap}
+
+  /* tabs + table */
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 12px}
+  .tab{font-family:var(--mono);font-size:12.5px;color:var(--muted);background:transparent;
+    border:1px solid var(--border);border-radius:999px;padding:7px 14px;cursor:pointer}
+  .tab[aria-selected="true"]{color:var(--accent);background:var(--accent-soft);border-color:transparent;font-weight:600}
+  .tab:focus-visible,.toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:14px;background:var(--surface);box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;min-width:760px}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--grid);white-space:nowrap}
+  th{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);font-weight:600;background:var(--surface-2)}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr:hover td{background:var(--surface-2)}
+  td.obj{font-family:var(--mono);font-size:12.5px}
+  td .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .tag{font-family:var(--mono);font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;display:inline-flex;align-items:center;gap:6px}
+  .delta-up{color:var(--crit)} .delta-ok{color:var(--muted)}
+  .hide{display:none}
+
+  /* architecture strip */
+  .pipe{display:grid;grid-template-columns:repeat(4,1fr);gap:0;align-items:stretch}
+  .stage{background:var(--surface);border:1px solid var(--border);padding:14px;position:relative}
+  .stage:first-child{border-radius:14px 0 0 14px} .stage:last-child{border-radius:0 14px 14px 0}
+  .stage+.stage{border-left:0}
+  .stage h3{font-size:13px;font-weight:600;margin-bottom:6px}
+  .stage p{font-size:11.5px;color:var(--muted);margin:0;font-family:var(--mono);line-height:1.5}
+  .stage .n{position:absolute;top:-9px;left:14px;font-family:var(--mono);font-size:10px;font-weight:600;
+    color:#fff;background:var(--accent);border-radius:999px;padding:2px 8px}
+  .stage .arrow{position:absolute;right:-9px;top:50%;transform:translateY(-50%);z-index:2;
+    color:var(--accent);font-size:16px;background:var(--bg);border-radius:50%}
+  @media(max-width:900px){.pipe{grid-template-columns:1fr}.stage,.stage:first-child,.stage:last-child{border-radius:14px;border-left:1px solid var(--border);margin-top:10px}.stage .arrow{display:none}}
+  .foot{margin-top:26px;font-size:12px;color:var(--faint);text-align:center;line-height:1.6}
+</style>
+
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="glyph">🛡️</div>
+      <div>
+        <h1>DR Reconciliation</h1>
+        <div class="sub">Object-level failover readiness for Databricks Managed DR</div>
+      </div>
+    </div>
+    <select class="selector" aria-label="Failover group">
+      <option>failover-group: prod-east→west</option>
+    </select>
+    <div class="meta">
+      last recon <span class="mono">2026-09-04 09:41 UTC</span><br>
+      primary <span class="mono">us-east-2</span> → secondary <span class="mono">us-west-2</span>
+    </div>
+    <button class="toggle" id="themeBtn" title="Toggle theme" aria-label="Toggle light/dark theme">◐</button>
+  </div>
+
+  <!-- KPI ROW -->
+  <section>
+    <div class="grid kpis">
+      <div class="card kpi accent-rail">
+        <div class="label">Failover readiness</div>
+        <div class="big" style="color:var(--warn)">AT RISK</div>
+        <div class="foot">1 table missing · 1 view failed · 2 job schedules absent. Not green until scope is fully covered.</div>
+      </div>
+      <div class="card kpi">
+        <div class="label">RPO — replication lag</div>
+        <div class="big">42<small> s</small></div>
+        <div class="foot">target ≤ 5m · within RPO · last replication point 09:40:20</div>
+      </div>
+      <div class="card kpi">
+        <div class="label">Objects in sync</div>
+        <div class="big">99.1<small> %</small></div>
+        <div class="foot">1,812 in scope · 16 need attention across 5 types</div>
+      </div>
+      <div class="card kpi">
+        <div class="label">Blocking errors</div>
+        <div class="big" style="color:var(--crit)">3</div>
+        <div class="foot">2 error classes · holding RPO on 4 assets</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCORECARD + SPARK -->
+  <section>
+    <div class="sechead"><span class="eyebrow">Coverage</span><h2>Reconciliation scorecard by object type</h2>
+      <span class="note">primary vs read-only secondary — the top-5 Managed-DR-supported objects</span></div>
+    <div class="grid two">
+      <div class="card">
+        <div id="scorecard"></div>
+        <div class="legend">
+          <span><i class="sw b-ok"></i>in sync</span>
+          <span><i class="sw b-warn"></i>lagging / drifted</span>
+          <span><i class="sw b-crit"></i>missing / failed</span>
+          <span><i class="sw b-info"></i>unsupported (in scope)</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="spark-head">
+          <div><div class="label eyebrow">RPO trend · replication_lag_ms</div>
+            <div class="spark-val" style="margin-top:8px">42<small style="font-size:14px;color:var(--muted)"> s</small></div></div>
+          <div class="pill s-ok"><span class="dot" style="background:currentColor"></span>within target</div>
+        </div>
+        <svg viewBox="0 0 320 96" preserveAspectRatio="none" aria-label="Replication lag over the last 24 hours" style="margin-top:12px">
+          <line x1="0" y1="34" x2="320" y2="34" stroke="var(--grid)" stroke-dasharray="3 4"/>
+          <path d="M0,70 L24,66 L48,72 L72,60 L96,64 L120,40 L144,52 L168,30 L192,58 L216,62 L240,55 L264,68 L288,60 L312,64 L320,63
+                   L320,96 L0,96 Z" fill="var(--accent)" opacity="0.14"/>
+          <path d="M0,70 L24,66 L48,72 L72,60 L96,64 L120,40 L144,52 L168,30 L192,58 L216,62 L240,55 L264,68 L288,60 L312,64 L320,63"
+                fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+          <circle cx="320" cy="63" r="3.5" fill="var(--accent)"/>
+        </svg>
+        <div class="foot" style="font-size:12px;color:var(--muted);margin-top:8px">
+          peak 88s at 03:00 · target line = 5m RPO · <span class="mono">null</span> lag ⇒ an asset has never replicated (alarm)
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ERRORS + SILENT GAP -->
+  <section>
+    <div class="grid cols">
+      <div class="card">
+        <div class="sechead" style="margin-bottom:6px"><span class="eyebrow">Native signal</span><h2>Blocking errors</h2></div>
+        <div class="note" style="font-size:12px;color:var(--muted);margin-bottom:6px">from <span class="mono">system.replication.states.errors[]</span></div>
+        <div class="err"><span class="dot" style="background:var(--crit)"></span>
+          <div><div class="cls">DR_MISSING_DEPENDENCY.SCHEMA</div><div class="msg">dr_poc.mart references schema absent in secondary scope</div></div>
+          <span class="count">2 tables</span></div>
+        <div class="err"><span class="dot" style="background:var(--info)"></span>
+          <div><div class="cls">DR_UNSUPPORTED_FEATURE.ABAC_POLICY</div><div class="msg">column mask on dr_poc.ml.features.ssn</div></div>
+          <span class="count">1 view</span></div>
+        <div class="err"><span class="dot" style="background:var(--warn)"></span>
+          <div><div class="cls">DR_INVALID_CONFIGURATION.MISSING_LOCATION_MAPPING</div><div class="msg">s3://…/raw/ has no storage mapping</div></div>
+          <span class="count">1 table</span></div>
+      </div>
+      <div class="card">
+        <div class="sechead" style="margin-bottom:6px"><span class="eyebrow">Gap we add</span><h2>Silent-gap detector</h2></div>
+        <div class="note" style="font-size:12px;color:var(--muted);margin-bottom:6px">in scope but ABSENT from <span class="mono">replication.states</span> — Managed DR reports these as neither success nor error</div>
+        <div class="err"><span class="dot" style="background:var(--info)"></span>
+          <div><div class="cls">materialized view</div><div class="msg">dr_poc.mart.daily_sales_mv — unsupported, needs manual rebuild</div></div>
+          <span class="count">unsupported</span></div>
+        <div class="err"><span class="dot" style="background:var(--info)"></span>
+          <div><div class="cls">streaming table</div><div class="msg">dr_poc.raw.events_st — not replicated</div></div>
+          <span class="count">unsupported</span></div>
+        <div class="err"><span class="dot" style="background:var(--crit)"></span>
+          <div><div class="cls">managed volume data</div><div class="msg">dr_poc.ml.artifacts — metadata only; data absent</div></div>
+          <span class="count">data gap</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DRILL DOWN -->
+  <section>
+    <div class="sechead"><span class="eyebrow">Drill-down</span><h2>Per-object reconciliation</h2>
+      <span class="note">exactly what we track for each object type — click a type</span></div>
+    <div class="tabs" role="tablist" id="tabs">
+      <button class="tab" role="tab" aria-selected="true"  data-t="tables">UC tables</button>
+      <button class="tab" role="tab" aria-selected="false" data-t="grants">Grants &amp; ownership</button>
+      <button class="tab" role="tab" aria-selected="false" data-t="views">Views &amp; functions</button>
+      <button class="tab" role="tab" aria-selected="false" data-t="jobs">Jobs</button>
+      <button class="tab" role="tab" aria-selected="false" data-t="notebooks">Notebooks &amp; files</button>
+    </div>
+
+    <div class="tablewrap" data-p="tables">
+      <table>
+        <thead><tr><th>Managed table</th><th>Version P→S</th><th>Row Δ</th><th>Size Δ</th><th>Schema</th><th>Lag</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="obj">dr_poc.sales.fact_orders</td><td class="num">318 → 318</td><td class="num delta-ok">0</td><td class="num delta-ok">±0</td><td>match</td><td class="num">31s</td><td><span class="tag s-ok"><span class="dot" style="background:currentColor"></span>IN_SYNC</span></td></tr>
+          <tr><td class="obj">dr_poc.sales.dim_customer</td><td class="num">204 → 201</td><td class="num delta-up">+12,904</td><td class="num delta-up">+18 MB</td><td>match</td><td class="num">4m10s</td><td><span class="tag s-warn"><span class="dot" style="background:currentColor"></span>LAGGING</span></td></tr>
+          <tr><td class="obj">dr_poc.mart.rev_by_region</td><td class="num">77 → 77</td><td class="num delta-ok">0</td><td class="num delta-ok">±0</td><td class="delta-up">+1 col</td><td class="num">52s</td><td><span class="tag s-warn"><span class="dot" style="background:currentColor"></span>DRIFTED</span></td></tr>
+          <tr><td class="obj">dr_poc.mart.orders_masked</td><td class="num">— → —</td><td class="num">—</td><td class="num">—</td><td>—</td><td class="num">—</td><td><span class="tag s-crit"><span class="dot" style="background:currentColor"></span>FAILED · column mask</span></td></tr>
+          <tr><td class="obj">dr_poc.raw.ext_clickstream</td><td class="num">— → ∅</td><td class="num">—</td><td class="num">—</td><td>—</td><td class="num">null</td><td><span class="tag s-crit"><span class="dot" style="background:currentColor"></span>MISSING · no mapping</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="tablewrap hide" data-p="grants">
+      <table>
+        <thead><tr><th>Securable</th><th>Grants P→S</th><th>Added in P</th><th>Removed in P</th><th>Owner</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="obj">CATALOG dr_poc</td><td class="num">42 → 42</td><td>—</td><td>—</td><td>match</td><td><span class="tag s-ok"><span class="dot" style="background:currentColor"></span>IN_SYNC</span></td></tr>
+          <tr><td class="obj">SCHEMA dr_poc.sales</td><td class="num">18 → 16</td><td class="delta-up">+ analysts:SELECT</td><td class="delta-up">+ etl_sp:MODIFY</td><td>match</td><td><span class="tag s-warn"><span class="dot" style="background:currentColor"></span>DRIFTED</span></td></tr>
+          <tr><td class="obj">TABLE dr_poc.sales.fact_orders</td><td class="num">9 → 9</td><td>—</td><td>—</td><td class="delta-up">svc-principal → user@co</td><td><span class="tag s-warn"><span class="dot" style="background:currentColor"></span>OWNER Δ</span></td></tr>
+          <tr><td class="obj">SCHEMA dr_poc.ml</td><td class="num">11 → 11</td><td>—</td><td>—</td><td>match</td><td><span class="tag s-ok"><span class="dot" style="background:currentColor"></span>IN_SYNC</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="tablewrap hide" data-p="views">
+      <table>
+        <thead><tr><th>View / function</th><th>DDL hash P→S</th><th>Dependencies</th><th>Cross-catalog</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="obj">VIEW dr_poc.mart.v_active_users</td><td class="num">3f9a → 3f9a</td><td>resolved</td><td>no</td><td><span class="tag s-ok"><span class="dot" style="background:currentColor"></span>IN_SYNC</span></td></tr>
+          <tr><td class="obj">VIEW dr_poc.mart.v_orders_enriched</td><td class="num">8c11 → 8c11</td><td class="delta-up">owner lacks SELECT on ref</td><td>yes</td><td><span class="tag s-crit"><span class="dot" style="background:currentColor"></span>FAILED · cross-cat perms</span></td></tr>
+          <tr><td class="obj">FUNCTION dr_poc.sales.fn_fx_rate</td><td class="num">a107 → 7be2</td><td>resolved</td><td>no</td><td><span class="tag s-warn"><span class="dot" style="background:currentColor"></span>DRIFTED · DDL</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="tablewrap hide" data-p="jobs">
+      <table>
+        <thead><tr><th>Job</th><th>Definition</th><th>Schedule (secondary)</th><th>Run-as / ACL</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="obj">job: nightly_etl</td><td>match</td><td class="mono">present · PAUSED ✓</td><td>match</td><td><span class="tag s-ok"><span class="dot" style="background:currentColor"></span>IN_SYNC</span></td></tr>
+          <tr><td class="obj">job: hourly_ingest</td><td>match</td><td class="delta-up mono">schedule ABSENT</td><td>match</td><td><span class="tag s-warn"><span class="dot" style="background:currentColor"></span>SCHEDULE Δ</span></td></tr>
+          <tr><td class="obj">job: ml_retrain</td><td class="delta-up">task added in P</td><td class="mono">present · PAUSED ✓</td><td class="delta-up">ACL diff</td><td><span class="tag s-warn"><span class="dot" style="background:currentColor"></span>DRIFTED</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="tablewrap hide" data-p="notebooks">
+      <table>
+        <thead><tr><th>Path (matched by asset ID)</th><th>Content</th><th>ACL P→S</th><th>ACL diff</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="obj">/Repos/prod/etl/bronze</td><td>hash match</td><td class="num">6 → 6</td><td>—</td><td><span class="tag s-ok"><span class="dot" style="background:currentColor"></span>IN_SYNC</span></td></tr>
+          <tr><td class="obj">/Workspace/prod/dashboards/exec</td><td>hash match</td><td class="num">4 → 3</td><td class="delta-up">− bi_team:CAN_VIEW</td><td><span class="tag s-warn"><span class="dot" style="background:currentColor"></span>ACL Δ</span></td></tr>
+          <tr><td class="obj">/Repos/prod/ml/train</td><td class="delta-up">hash differs</td><td class="num">5 → 5</td><td>—</td><td><span class="tag s-warn"><span class="dot" style="background:currentColor"></span>DRIFTED</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section>
+    <div class="sechead"><span class="eyebrow">How it works</span><h2>Architecture — from native signals to the report</h2></div>
+    <div class="pipe">
+      <div class="stage"><span class="n">1 · SOURCES</span><span class="arrow">→</span>
+        <h3>Native + metadata</h3>
+        <p>system.replication.states<br>DR REST API (scope)<br>information_schema ×2<br>DESCRIBE DETAIL/HISTORY<br>lakeflow.jobs · Workspace API</p></div>
+      <div class="stage"><span class="n">2 · ENGINE</span><span class="arrow">→</span>
+        <h3>Recon job</h3>
+        <p>reads PRIMARY +<br>read-only SECONDARY,<br>diffs per object by<br>version/schema/grant/ACL,<br>classifies each object</p></div>
+      <div class="stage"><span class="n">3 · TABLES</span><span class="arrow">→</span>
+        <h3>Delta control tables</h3>
+        <p>dr_recon_runs<br>dr_recon_inventory<br>dr_recon_findings<br>(status · signatures ·<br>severity · first_seen)</p></div>
+      <div class="stage"><span class="n">4 · REPORT</span>
+        <h3>AI/BI dashboard</h3>
+        <p>readiness · scorecard ·<br>RPO trend · errors ·<br>silent-gap detector ·<br>per-object drill-down ·<br>audit-ready export</p></div>
+    </div>
+  </section>
+
+  <div class="foot">
+    Reconciles the Databricks Managed DR secondary against the primary, object by object — the per-object,
+    audit-ready view Managed DR's aggregate replication point does not provide.<br>
+    Illustrative sample data · scoped to Managed-DR-supported objects.
+  </div>
+</div>
+
+<script>
+  // per-object tabs
+  const tabs=document.getElementById('tabs');
+  tabs.addEventListener('click',e=>{
+    const b=e.target.closest('.tab'); if(!b)return;
+    [...tabs.children].forEach(t=>t.setAttribute('aria-selected', t===b));
+    document.querySelectorAll('.tablewrap').forEach(w=>w.classList.toggle('hide', w.dataset.p!==b.dataset.t));
+  });
+  // theme toggle (respects the viewer's theme until they click)
+  const btn=document.getElementById('themeBtn'), root=document.documentElement;
+  btn.addEventListener('click',()=>{
+    const dark = root.getAttribute('data-theme')==='dark'
+      || (!root.getAttribute('data-theme') && matchMedia('(prefers-color-scheme:dark)').matches);
+    root.setAttribute('data-theme', dark?'light':'dark');
+  });
+</script>
