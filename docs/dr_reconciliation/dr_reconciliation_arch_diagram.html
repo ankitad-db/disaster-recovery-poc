@@ -7,7 +7,7 @@
     --bg:#eef2f6; --surface:#ffffff; --surface-2:#f4f7fa; --surface-3:#e9eff5; --border:#cdd8e3;
     --text:#0f1b26; --muted:#5a6b7b; --faint:#8496a6;
     --accent:#0e7c8f; --accent-soft:#d3ecf1;
-    --ok:#15803d; --ok-bg:#dcfce7; --warn:#b45309; --crit:#b91c1c; --info:#6d4efc; --info-bg:#ece7ff;
+    --ok:#15803d; --ok-bg:#dcfce7; --warn:#b45309; --warn-bg:#fdeccf; --crit:#b91c1c; --info:#6d4efc; --info-bg:#ece7ff;
     --grid:#e4ebf1; --shadow:0 1px 2px rgba(16,30,45,.06),0 4px 16px rgba(16,30,45,.06);
     --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace; --sans:"IBM Plex Sans",-apple-system,Segoe UI,Roboto,sans-serif;
   }
@@ -15,210 +15,450 @@
     --bg:#0a1017; --surface:#111a23; --surface-2:#16212d; --surface-3:#1b2836; --border:#2b3b49;
     --text:#e7eef4; --muted:#93a6b6; --faint:#63788a;
     --accent:#28c2e0; --accent-soft:#0e3540;
-    --ok:#3fd07f; --ok-bg:#0f2f20; --warn:#f6b23c; --crit:#f87171; --info:#a78bfa; --info-bg:#241a45;
+    --ok:#3fd07f; --ok-bg:#0f2f20; --warn:#f6b23c; --warn-bg:#3a2a10; --crit:#f87171; --info:#a78bfa; --info-bg:#241a45;
     --grid:#1e2b37; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 22px rgba(0,0,0,.35);
   }}
   :root[data-theme="dark"]{
     --bg:#0a1017; --surface:#111a23; --surface-2:#16212d; --surface-3:#1b2836; --border:#2b3b49;
     --text:#e7eef4; --muted:#93a6b6; --faint:#63788a;
     --accent:#28c2e0; --accent-soft:#0e3540;
-    --ok:#3fd07f; --ok-bg:#0f2f20; --warn:#f6b23c; --crit:#f87171; --info:#a78bfa; --info-bg:#241a45;
+    --ok:#3fd07f; --ok-bg:#0f2f20; --warn:#f6b23c; --warn-bg:#3a2a10; --crit:#f87171; --info:#a78bfa; --info-bg:#241a45;
     --grid:#1e2b37; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 22px rgba(0,0,0,.35);
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14.5px;line-height:1.55;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:1320px;margin:0 auto;padding:22px 22px 64px}
-  .mono{font-family:var(--mono)}
-  code{font-family:var(--mono);font-size:.9em;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+  .wrap{max-width:1360px;margin:0 auto;padding:22px 22px 64px}
+  code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+  h2{font-size:15px;font-weight:600;margin:0}
   .topbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 18px;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
   .glyph{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(150deg,var(--accent),#155e75);color:#fff;font-size:18px}
   .topbar h1{font-size:17px;font-weight:600;letter-spacing:-.01em} .topbar .sub{font-size:12px;color:var(--muted)}
   .toggle{margin-left:auto;border:1px solid var(--border);background:var(--surface-2);color:var(--muted);border-radius:9px;width:36px;height:36px;cursor:pointer;font-size:15px}
   .toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:var(--shadow);margin-top:16px}
+  section{margin-top:18px}
+  .sechead{display:flex;align-items:baseline;gap:10px;margin:0 2px 11px;flex-wrap:wrap}
+  .sechead .n{font-family:var(--mono);font-size:12px;font-weight:600;color:#fff;background:var(--accent);border-radius:7px;padding:2px 8px}
+  .sechead .note{font-size:12px;color:var(--muted)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:var(--shadow)}
+
+  /* prerequisites */
+  .prereq{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+  @media(max-width:900px){.prereq{grid-template-columns:1fr}}
+  .prereq .card h2{margin-bottom:4px}
+  .prereq .tag{font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 7px;border-radius:5px;margin-left:8px}
+  .tag.gate{background:var(--warn-bg);color:var(--warn)} .tag.infra{background:var(--accent-soft);color:var(--accent)}
+  .req{display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--grid);font-size:12.7px}
+  .req:first-of-type{border-top:0}
+  .req .b{color:var(--ok);flex:none;font-weight:700}
+  .req b{font-weight:600} .req span{color:var(--muted)}
+
   .diagram{overflow-x:auto}
-  svg.arch{width:100%;min-width:1080px;height:auto;display:block}
-  /* svg text theming via classes */
+  svg.arch{width:100%;min-width:1240px;height:auto;display:block}
   svg text{font-family:var(--mono)}
-  .zt{fill:var(--faint);font-size:12px;font-weight:600;letter-spacing:.08em}
-  .bt{fill:var(--text);font-size:12.5px;font-weight:600}
-  .bm{fill:var(--muted);font-size:11px}
+  .zt{fill:var(--faint);font-size:12px;font-weight:600;letter-spacing:.06em}
+  .bt{fill:var(--text);font-size:12px;font-weight:600}
+  .bm{fill:var(--muted);font-size:10.2px}
+  .cd{fill:var(--muted);font-size:9.4px}
   .at{fill:var(--accent);font-size:13px;font-weight:600}
-  .flowlab{fill:var(--muted);font-size:10.5px}
-  .zone{fill:var(--surface-3);opacity:.5}
-  .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
-  .box2{fill:var(--surface-2);stroke:var(--border);stroke-width:1.3}
-  .prim{stroke:var(--ok)} .sec{stroke:var(--info)} .eng{stroke:var(--accent);stroke-width:2}
-  .flowline{stroke:var(--muted);stroke-width:1.6;fill:none}
+  .authlab{fill:var(--accent);font-size:9.6px;font-weight:600}
+  .flowlab{fill:var(--muted);font-size:9.6px}
+  .zone{fill:var(--surface-3);opacity:.45}
+  .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+  .box2{fill:var(--surface-2);stroke:var(--border);stroke-width:1.2}
+  .eng{stroke:var(--accent);stroke-width:2}
+  .flowline{stroke:var(--muted);stroke-width:1.5;fill:none}
+  .authline{stroke:var(--accent);stroke-width:1.5;fill:none}
   .replline{stroke:var(--ok);stroke-width:2.2;fill:none}
-  .num{fill:var(--accent);font-size:11px;font-weight:700}
+  .num{fill:var(--accent);font-size:10.5px;font-weight:700}
   .numbg{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.2}
-  .legend{display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;font-size:12px;color:var(--muted)}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font-size:12px;color:var(--muted)}
   .legend span{display:inline-flex;align-items:center;gap:7px}
   .legend i{width:22px;border-top-width:2.4px;border-top-style:solid;display:inline-block}
-  .legend b.dsh{border-top-style:dashed}
   .flowkey{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 22px;margin-top:16px}
   @media(max-width:820px){.flowkey{grid-template-columns:1fr}}
   .flowkey .k{display:flex;gap:10px;align-items:flex-start;font-size:12.5px}
-  .flowkey .b{min-width:22px;height:22px;border-radius:6px;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent);font-family:var(--mono);font-weight:700;font-size:12px;display:grid;place-items:center}
-  .flowkey .b.g{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+  .flowkey .bx{min-width:22px;height:22px;border-radius:6px;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent);font-family:var(--mono);font-weight:700;font-size:12px;display:grid;place-items:center}
+  .flowkey .bx.g{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
   .flowkey .t b{font-weight:600} .flowkey .t span{color:var(--muted)}
   .foot{margin-top:24px;font-size:12px;color:var(--faint);text-align:center;line-height:1.6}
+  /* common pattern + per-asset */
+  pre{margin:0;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:12.4px;line-height:1.6;color:var(--text)}
+  pre .c{color:var(--faint)} pre .k{color:var(--accent);font-weight:600} pre .s2{color:var(--ok)}
+  .assets{display:grid;grid-template-columns:repeat(2,1fr);gap:13px}
+  @media(max-width:960px){.assets{grid-template-columns:1fr}}
+  .asset{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:14px 15px;box-shadow:var(--shadow)}
+  .asset .hd{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+  .asset .rk{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:6px;width:22px;height:22px;display:grid;place-items:center;flex:none}
+  .asset h3{font-size:13.5px;font-weight:600;margin:0}
+  .asset .tg{font-family:var(--mono);font-size:9.5px;font-weight:600;padding:1px 6px;border-radius:5px;margin-left:auto}
+  .tg.ws{background:var(--accent-soft);color:var(--accent)} .tg.uc{background:var(--info-bg);color:var(--info)}
+  .asset dl{margin:0;display:grid;grid-template-columns:74px 1fr;gap:3px 10px}
+  .asset dt{font-family:var(--mono);font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);padding-top:2px}
+  .asset dd{margin:0;font-size:12px;color:var(--text)}
+  .asset dd code{font-size:11px}
+  .asset dd.g{color:var(--muted);font-size:11.5px}
+  .asset dd .st{font-family:var(--mono);font-size:11px;font-weight:600}
+  .crit{color:var(--crit)} .warnc{color:var(--warn)} .okc{color:var(--ok)} .infoc{color:var(--info)}
 </style>
 
 <div class="wrap">
   <div class="topbar">
     <div class="glyph">🗺️</div>
     <div><h1>DR Reconciliation — Detailed Architecture</h1>
-      <div class="sub">Recon engine + AI/BI dashboard over Databricks Managed DR · AWS · two-region</div></div>
+      <div class="sub">Recon engine + AI/BI dashboard over Databricks Managed DR · AWS · two-region · developer reference</div></div>
     <button class="toggle" id="themeBtn" title="Toggle theme" aria-label="Toggle light/dark theme">◐</button>
   </div>
 
-  <div class="card diagram">
-    <svg class="arch" viewBox="0 0 1260 860" role="img" aria-label="Detailed DR reconciliation architecture diagram">
-      <defs>
-        <marker id="a" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
-        <marker id="ag" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ok)"/></marker>
-      </defs>
-
-      <!-- ===== ACCOUNT / CONTROL PLANE band ===== -->
-      <rect class="box2" x="400" y="24" width="460" height="66" rx="11"/>
-      <text class="zt" x="416" y="44">ACCOUNT · CONTROL PLANE</text>
-      <text class="bt" x="416" y="63">Managed DR failover group  ·  state ACTIVE</text>
-      <text class="bm" x="416" y="80">system.replication.states  ·  DR REST API  →  scope · RPO lag · errors[]</text>
-
-      <!-- ===== PRIMARY REGION zone ===== -->
-      <rect class="zone" x="24" y="150" width="340" height="612" rx="16"/>
-      <rect x="24" y="150" width="340" height="612" rx="16" fill="none" stroke="var(--ok)" stroke-width="1.4"/>
-      <text class="zt" x="44" y="176">PRIMARY REGION · us-east-2</text>
-      <rect class="box prim" x="44" y="190" width="300" height="52" rx="10"/>
-      <text class="bt" x="60" y="214">PRIMARY workspace · dr-prod-east</text>
-      <text class="bm" x="60" y="231">WRITABLE · source of truth</text>
-      <!-- primary sources -->
-      <text class="zt" x="44" y="272" font-size="11">SOURCES (read for primary_sig)</text>
-      <rect class="box2" x="44" y="282" width="300" height="42" rx="9"/>
-      <text class="bt" x="58" y="300" font-size="11.5">information_schema</text>
-      <text class="bm" x="58" y="316">tables·columns·views·routines·*_privileges</text>
-      <rect class="box2" x="44" y="330" width="300" height="42" rx="9"/>
-      <text class="bt" x="58" y="348" font-size="11.5">DESCRIBE DETAIL / HISTORY</text>
-      <text class="bm" x="58" y="364">version · rows · numFiles · size · schema</text>
-      <rect class="box2" x="44" y="378" width="300" height="42" rx="9"/>
-      <text class="bt" x="58" y="396" font-size="11.5">Jobs · Warehouses · Clusters API</text>
-      <text class="bm" x="58" y="412">defs · schedules · configs · state</text>
-      <rect class="box2" x="44" y="426" width="300" height="42" rx="9"/>
-      <text class="bt" x="58" y="444" font-size="11.5">Workspace · permissions API</text>
-      <text class="bm" x="58" y="460">notebooks · files · folders · ACLs</text>
-      <rect class="box2" x="44" y="474" width="300" height="42" rx="9"/>
-      <text class="bt" x="58" y="492" font-size="11.5">Lakeview API</text>
-      <text class="bm" x="58" y="508">draft AI/BI dashboards</text>
-      <text class="bm" x="44" y="540" font-size="10.5">object types 1–10 · workspace assets + Unity Catalog</text>
-
-      <!-- ===== SECONDARY REGION zone ===== -->
-      <rect class="zone" x="896" y="150" width="340" height="612" rx="16"/>
-      <rect x="896" y="150" width="340" height="612" rx="16" fill="none" stroke="var(--info)" stroke-width="1.4"/>
-      <text class="zt" x="916" y="176">SECONDARY REGION · us-west-2</text>
-      <rect class="box sec" x="916" y="190" width="300" height="52" rx="10"/>
-      <text class="bt" x="932" y="214">SECONDARY workspace · dr-prod-west</text>
-      <text class="bm" x="932" y="231">READ-ONLY replica · no compute</text>
-      <rect class="box sec" x="916" y="258" width="300" height="60" rx="10" stroke-dasharray="6 4"/>
-      <text class="bt" x="932" y="282">MONITOR workspace (read-only)</text>
-      <text class="bm" x="932" y="299">secondary region · bound to west-metastore</text>
-      <text class="bm" x="932" y="313">runs all secondary-side reads</text>
-      <text class="zt" x="916" y="348" font-size="11">SOURCES (read for secondary_sig)</text>
-      <rect class="box2" x="916" y="358" width="300" height="158" rx="10"/>
-      <text class="bm" x="932" y="380" font-size="11.5">same reads as primary, via MONITOR:</text>
-      <text class="bm" x="932" y="402">· information_schema (secondary metastore)</text>
-      <text class="bm" x="932" y="422">· DESCRIBE DETAIL / HISTORY</text>
-      <text class="bm" x="932" y="442">· Jobs · Warehouses · Clusters API</text>
-      <text class="bm" x="932" y="462">· Workspace · permissions API</text>
-      <text class="bm" x="932" y="482">· Lakeview API (drafts)</text>
-      <text class="bm" x="932" y="504" font-size="10.5">read-only — writes rejected until promotion</text>
-
-      <!-- ===== Managed DR replication link (primary workspace <-> secondary workspace) ===== -->
-      <path class="replline" d="M194,190 L194,124 L1066,124 L1066,190" marker-end="url(#ag)" marker-start="url(#ag)"/>
-      <rect x="470" y="108" width="320" height="34" rx="9" fill="var(--ok-bg)" stroke="var(--ok)" stroke-width="1.2"/>
-      <text x="630" y="129" text-anchor="middle" font-size="10.5" fill="var(--ok)" font-weight="600">Managed DR · continuous replication — failover/failback reverses</text>
-
-      <!-- ===== RECON ENGINE ===== -->
-      <rect class="box eng" x="424" y="168" width="412" height="300" rx="13"/>
-      <text class="at" x="630" y="192" text-anchor="middle">RECON ENGINE · scheduled serverless job</text>
-      <text class="bm" x="630" y="208" text-anchor="middle">primary or neutral workspace · runs as DR service principal</text>
-      <!-- modules -->
-      <rect class="box2" x="446" y="220" width="368" height="34" rx="8"/><text class="bt" x="462" y="242" font-size="11.5">Scope Resolver</text><text class="bm" x="700" y="242" font-size="10.5">→ catalogs · ws-sets · RPO target · errors[]</text>
-      <rect class="box2" x="446" y="260" width="368" height="34" rx="8"/><text class="bt" x="462" y="282" font-size="11.5">Primary Reader</text><text class="bm" x="700" y="282" font-size="10.5">fan-out ×10 object readers</text>
-      <rect class="box2" x="446" y="300" width="368" height="34" rx="8"/><text class="bt" x="462" y="322" font-size="11.5">Secondary Reader</text><text class="bm" x="700" y="322" font-size="10.5">same readers, via monitor WS</text>
-      <rect class="box2" x="446" y="340" width="368" height="34" rx="8"/><text class="bt" x="462" y="362" font-size="11.5">Differ</text><text class="bm" x="700" y="362" font-size="10.5">signature compare per object</text>
-      <rect class="box2" x="446" y="380" width="368" height="34" rx="8"/><text class="bt" x="462" y="402" font-size="11.5">Classifier</text><text class="bm" x="700" y="402" font-size="10.5">status + severity + readiness</text>
-      <rect class="box2" x="446" y="420" width="368" height="34" rx="8"/><text class="bt" x="462" y="442" font-size="11.5">Control Writer</text><text class="bm" x="700" y="442" font-size="10.5">idempotent MERGE per run_id</text>
-      <!-- internal flow arrows between modules -->
-      <line class="flowline" x1="630" y1="254" x2="630" y2="260" marker-end="url(#a)"/>
-      <line class="flowline" x1="630" y1="294" x2="630" y2="300" marker-end="url(#a)"/>
-      <line class="flowline" x1="630" y1="334" x2="630" y2="340" marker-end="url(#a)"/>
-      <line class="flowline" x1="630" y1="374" x2="630" y2="380" marker-end="url(#a)"/>
-      <line class="flowline" x1="630" y1="414" x2="630" y2="420" marker-end="url(#a)"/>
-
-      <!-- ===== CONTROL TABLES ===== -->
-      <rect class="box" x="424" y="506" width="412" height="96" rx="13"/>
-      <text class="at" x="630" y="528" text-anchor="middle" font-size="12.5">dr_recon_* control tables · Delta (dr_poc.dr_control)</text>
-      <text class="bm" x="446" y="550" font-size="11">dr_recon_runs</text><text class="bm" x="640" y="550" font-size="11">dr_recon_coverage</text>
-      <text class="bm" x="446" y="570" font-size="11">dr_recon_inventory</text><text class="bm" x="640" y="570" font-size="11">dr_recon_findings</text>
-      <text class="bm" x="446" y="590" font-size="10.5">run summary · (type×status) rollup · per-object detail · findings</text>
-
-      <!-- ===== DASHBOARD ===== -->
-      <rect class="box eng" x="424" y="638" width="412" height="120" rx="13"/>
-      <text class="at" x="630" y="660" text-anchor="middle">AI/BI Dashboard · reads dr_recon_* only</text>
-      <text class="bm" x="630" y="679" text-anchor="middle" font-size="10.5">decoupled from Managed-DR enrollment</text>
-      <text class="bm" x="446" y="700" font-size="10.5">· readiness (RAG) · RPO / RTO KPIs</text>
-      <text class="bm" x="446" y="717" font-size="10.5">· coverage scorecard (10 objects)</text>
-      <text class="bm" x="446" y="734" font-size="10.5">· failover/failback history + recon</text>
-      <text class="bm" x="646" y="700" font-size="10.5">· RPO trend · blocking errors</text>
-      <text class="bm" x="646" y="717" font-size="10.5">· silent-gap detector</text>
-      <text class="bm" x="646" y="734" font-size="10.5">· per-object drill-down · checklist</text>
-
-      <!-- ===== external flow arrows + numbers ===== -->
-      <!-- 1 account -> scope resolver -->
-      <line class="flowline" x1="630" y1="90" x2="630" y2="168" marker-end="url(#a)"/>
-      <circle class="numbg" cx="648" cy="150" r="11"/><text class="num" x="648" y="154" text-anchor="middle">1</text>
-      <!-- 2 primary sources -> primary reader -->
-      <path class="flowline" d="M344,398 C400,398 404,277 446,277" marker-end="url(#a)"/>
-      <circle class="numbg" cx="404" cy="333" r="11"/><text class="num" x="404" y="337" text-anchor="middle">2</text>
-      <!-- 3 secondary/monitor -> secondary reader -->
-      <path class="flowline" d="M916,317 C860,317 856,317 814,317" marker-end="url(#a)"/>
-      <circle class="numbg" cx="866" cy="317" r="11"/><text class="num" x="866" y="321" text-anchor="middle">3</text>
-      <!-- 5 writer -> control tables -->
-      <line class="flowline" x1="630" y1="468" x2="630" y2="506" marker-end="url(#a)"/>
-      <circle class="numbg" cx="648" cy="488" r="11"/><text class="num" x="648" y="492" text-anchor="middle">5</text>
-      <text class="flowlab" x="662" y="491">MERGE</text>
-      <!-- 6 control tables -> dashboard -->
-      <line class="flowline" x1="630" y1="602" x2="630" y2="638" marker-end="url(#a)"/>
-      <circle class="numbg" cx="648" cy="620" r="11"/><text class="num" x="648" y="624" text-anchor="middle">6</text>
-      <text class="flowlab" x="662" y="623">SQL warehouse</text>
-      <!-- 4 label inside engine (diff/classify) -->
-      <circle class="numbg" cx="424" cy="357" r="11"/><text class="num" x="424" y="361" text-anchor="middle">4</text>
-    </svg>
-
-    <div class="legend">
-      <span><i style="border-color:var(--ok)"></i> primary region (writable)</span>
-      <span><i style="border-color:var(--info)"></i> secondary region (read-only)</span>
-      <span><i style="border-color:var(--accent)"></i> recon engine &amp; dashboard</span>
-      <span><i class="dsh" style="border-color:var(--info);border-top-style:dashed"></i> monitor workspace</span>
-      <span><i style="border-color:var(--ok)"></i> Managed DR replication</span>
+  <!-- ===== PREREQUISITES ===== -->
+  <section>
+    <div class="sechead"><span class="n">0</span><h2>Prerequisites</h2><span class="note">must all be true before the recon engine has anything to reconcile</span></div>
+    <div class="prereq">
+      <div class="card">
+        <h2>Managed DR enablement<span class="tag gate">GATED</span></h2>
+        <div class="req"><span class="b">✓</span><div><b>Managed DR approved</b> for the account <span>— gated; request via the Databricks account team.</span></div></div>
+        <div class="req"><span class="b">✓</span><div><b>Premium plan</b> in both regions + <b>Mission Critical add-on</b> on <b>both</b> workspaces <span>(primary + secondary).</span></div></div>
+        <div class="req"><span class="b">✓</span><div><b>Serverless compute enabled</b> on both workspaces <span>— replication + secondary reads use it.</span></div></div>
+        <div class="req"><span class="b">✓</span><div><b>Secondary workspace + UC metastore</b> in the DR region, same account &amp; cloud; network/PrivateLink/CMK match the primary.</div></div>
+        <div class="req"><span class="b">✓</span><div><b>External locations + storage credentials</b> created in the secondary for every one the primary catalogs use, plus <b>storage mappings</b> <span>(S3→S3, e.g. <code>s3://primary/*</code> → <code>s3://secondary/*</code>) — NOT auto-created.</span></div></div>
+        <div class="req"><span class="b">✓</span><div><b>Account SSO + SCIM</b> to both regions <span>so users/groups/SPNs exist on both sides (grants &amp; ACLs resolve).</span></div></div>
+        <div class="req"><span class="b">✓</span><div><b>Control-plane IP allowlisting</b> at the S3/DBFS firewalls <span>(peer region), and <b>failover group ACTIVE</b> with the target catalogs + workspace assets in scope.</span></div></div>
+        <div class="req"><span class="b">✓</span><div><b>Stable URL + front-end PrivateLink</b> <span>(optional but recommended) so clients + Terraform/DABs survive failover.</span></div></div>
+      </div>
+      <div class="card">
+        <h2>Recon engine infra<span class="tag infra">BUILD</span></h2>
+        <div class="req"><span class="b">✓</span><div><b>DR service principal</b> the engine runs as <span>— <code>USE</code>/<code>SELECT</code> on in-scope catalogs + <code>CAN_VIEW</code> on workspace assets (primary), read-only equivalents on secondary.</span></div></div>
+        <div class="req"><span class="b">✓</span><div><b>Read-only monitor workspace</b> in the secondary region, <b>bound to the secondary metastore</b> <span>— the only way to read the read-only secondary (no compute on the passive workspace).</span></div></div>
+        <div class="req"><span class="b">✓</span><div><b>Peer connection</b>: secondary host + token in a <b>secret scope</b> on the engine workspace <span>(the engine reaches the monitor WS by host+token).</span></div></div>
+        <div class="req"><span class="b">✓</span><div><b>Account-level read</b> of the <b>DR REST API</b> (<code>/api/disaster-recovery/v1</code>) and <code>system.replication.states</code>.</div></div>
+        <div class="req"><span class="b">✓</span><div><b>Control catalog with managed storage</b> for <code>dr_recon_*</code> <span>(e.g. <code>dr_poc.dr_control</code>; use each workspace's default catalog if a fresh one lacks managed storage).</span></div></div>
+        <div class="req"><span class="b">✓</span><div><b>Serverless SQL warehouse</b> for the control-table MERGE + dashboard queries.</div></div>
+        <div class="req"><span class="b">✓</span><div><b>Scheduler</b>: Databricks Asset Bundle job on the <b>RPO cadence</b> (15–60 min); direction auto-detected from <code>effective_primary_region</code>.</div></div>
+        <div class="req"><span class="b">✓</span><div><b>Alert sink</b>: SQL Alert / webhook for regressions (new MISSING·FAILED, RPO breach, readiness ≠ GREEN).</div></div>
+      </div>
     </div>
+  </section>
 
-    <div class="flowkey">
-      <div class="k"><div class="b">1</div><div class="t"><b>Resolve scope</b><br><span>DR REST API + <code>system.replication.states</code> → in-scope catalogs, workspace sets, RPO target, blocking errors.</span></div></div>
-      <div class="k"><div class="b">2</div><div class="t"><b>Read primary</b><br><span>Primary-side signature for every in-scope object of the 10 types.</span></div></div>
-      <div class="k"><div class="b">3</div><div class="t"><b>Read secondary</b><br><span>Same reads against the read-only secondary via the monitor workspace.</span></div></div>
-      <div class="k"><div class="b">4</div><div class="t"><b>Diff &amp; classify</b><br><span>Compare signatures; fold in DR errors + silent-gap set → status + severity + readiness.</span></div></div>
-      <div class="k"><div class="b">5</div><div class="t"><b>Persist</b><br><span>Idempotent MERGE into the four <code>dr_recon_*</code> tables.</span></div></div>
-      <div class="k"><div class="b">6</div><div class="t"><b>Publish</b><br><span>AI/BI dashboard reads the tables via a SQL warehouse; alerts fire on regression.</span></div></div>
-      <div class="k"><div class="b g">↺</div><div class="t"><b>Failover / failback</b><br><span>Direction is read from <code>effective_primary_region</code>; the engine reconciles whichever region is primary, and logs each DR event + post-event reconciliation.</span></div></div>
+  <!-- ===== DETAILED DIAGRAM ===== -->
+  <section>
+    <div class="sechead"><span class="n">1</span><h2>System architecture &amp; data flow</h2><span class="note">concrete APIs/SQL per reader · auth on each hop · engine internals · numbered flow</span></div>
+    <div class="card diagram">
+      <svg class="arch" viewBox="0 0 1300 1000" role="img" aria-label="Detailed DR reconciliation architecture and data flow">
+        <defs>
+          <marker id="a" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+          <marker id="ac" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="ag" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ok)"/></marker>
+        </defs>
+
+        <!-- TRIGGER -->
+        <rect class="box2" x="30" y="20" width="300" height="72" rx="11"/>
+        <text class="zt" x="46" y="40">TRIGGER</text>
+        <text class="bt" x="46" y="58">Asset Bundle job · serverless</text>
+        <text class="bm" x="46" y="74">run_as DR service principal</text>
+        <text class="bm" x="46" y="88">cadence = RPO target (15–60 min)</text>
+
+        <!-- CONTROL PLANE -->
+        <rect class="box2" x="386" y="20" width="528" height="72" rx="11"/>
+        <text class="zt" x="402" y="40">ACCOUNT · CONTROL PLANE (gated: Managed DR)</text>
+        <text class="bt" x="402" y="58">Managed DR failover group — state ACTIVE</text>
+        <text class="bm" x="402" y="76">system.replication.states  ·  DR REST API /api/disaster-recovery/v1</text>
+        <text class="cd" x="402" y="89">→ scope (catalogs, workspace_sets) · replication_lag_ms (RPO) · errors[]</text>
+
+        <!-- PRIMARY REGION -->
+        <rect class="zone" x="24" y="150" width="372" height="700" rx="16"/>
+        <rect x="24" y="150" width="372" height="700" rx="16" fill="none" stroke="var(--ok)" stroke-width="1.4"/>
+        <text class="zt" x="44" y="176">PRIMARY REGION · us-east-2</text>
+        <rect class="box" x="44" y="188" width="332" height="50" rx="10" stroke="var(--ok)"/>
+        <text class="bt" x="60" y="210">PRIMARY workspace · dr-prod-east</text>
+        <text class="bm" x="60" y="227">WRITABLE · source of truth · Mission Critical</text>
+        <text class="zt" x="44" y="266" font-size="11">SOURCES → primary_sig</text>
+        <rect class="box2" x="44" y="276" width="332" height="48" rx="9"/>
+        <text class="bt" x="58" y="294" font-size="11">information_schema (UC metadata + grants)</text>
+        <text class="cd" x="58" y="309">tables·columns·views·routines·*_privileges</text>
+        <text class="cd" x="58" y="320">spark.sql("SELECT … FROM &lt;cat&gt;.information_schema.*")</text>
+        <rect class="box2" x="44" y="330" width="332" height="46" rx="9"/>
+        <text class="bt" x="58" y="348" font-size="11">Delta metadata (table fidelity)</text>
+        <text class="cd" x="58" y="363">DESCRIBE DETAIL · DESCRIBE HISTORY · SHOW CREATE</text>
+        <text class="cd" x="58" y="373">version · rows · numFiles · sizeInBytes · schema</text>
+        <rect class="box2" x="44" y="382" width="332" height="46" rx="9"/>
+        <text class="bt" x="58" y="400" font-size="11">Jobs · Warehouses · Clusters API</text>
+        <text class="cd" x="58" y="415">ws.jobs.list/get · ws.warehouses.* · ws.clusters.*</text>
+        <text class="cd" x="58" y="425">defs · schedules · configs · state</text>
+        <rect class="box2" x="44" y="434" width="332" height="46" rx="9"/>
+        <text class="bt" x="58" y="452" font-size="11">Workspace · permissions API</text>
+        <text class="cd" x="58" y="467">ws.workspace.list/export · ws.permissions.get</text>
+        <text class="cd" x="58" y="477">notebooks · files · folders · ACLs (by asset_id)</text>
+        <rect class="box2" x="44" y="486" width="332" height="44" rx="9"/>
+        <text class="bt" x="58" y="504" font-size="11">Lakeview API</text>
+        <text class="cd" x="58" y="519">ws.lakeview.list/get — draft AI/BI dashboards</text>
+        <text class="cd" x="44" y="556">10 object types = 7 workspace-asset + 3 Unity Catalog</text>
+
+        <!-- SECONDARY REGION -->
+        <rect class="zone" x="904" y="150" width="372" height="700" rx="16"/>
+        <rect x="904" y="150" width="372" height="700" rx="16" fill="none" stroke="var(--info)" stroke-width="1.4"/>
+        <text class="zt" x="924" y="176">SECONDARY REGION · us-west-2</text>
+        <rect class="box" x="924" y="188" width="332" height="50" rx="10" stroke="var(--info)"/>
+        <text class="bt" x="940" y="210">SECONDARY workspace · dr-prod-west</text>
+        <text class="bm" x="940" y="227">READ-ONLY replica · NO compute</text>
+        <rect class="box" x="924" y="252" width="332" height="58" rx="10" stroke="var(--info)" stroke-dasharray="6 4"/>
+        <text class="bt" x="940" y="274">MONITOR workspace (read-only)</text>
+        <text class="bm" x="940" y="290">DR region · bound to west-metastore</text>
+        <text class="bm" x="940" y="303">executes all secondary-side reads</text>
+        <text class="zt" x="924" y="338" font-size="11">SOURCES → secondary_sig (via monitor)</text>
+        <rect class="box2" x="924" y="348" width="332" height="182" rx="10"/>
+        <text class="bm" x="940" y="370" font-size="11">same readers as primary, read-only:</text>
+        <text class="cd" x="940" y="390">· information_schema (secondary metastore)</text>
+        <text class="cd" x="940" y="408">· DESCRIBE DETAIL / HISTORY · SHOW CREATE</text>
+        <text class="cd" x="940" y="426">· ws.jobs/warehouses/clusters (monitor client)</text>
+        <text class="cd" x="940" y="444">· ws.workspace/permissions (monitor client)</text>
+        <text class="cd" x="940" y="462">· ws.lakeview (drafts)</text>
+        <text class="cd" x="940" y="484">writes rejected until the workspace is promoted</text>
+        <text class="cd" x="940" y="508">published dashboards / secrets / models / MVs =</text>
+        <text class="cd" x="940" y="520">out of Managed-DR scope → silent-gap findings</text>
+
+        <!-- Managed DR replication link -->
+        <path class="replline" d="M210,188 L210,126 L1090,126 L1090,188" marker-end="url(#ag)" marker-start="url(#ag)"/>
+        <rect x="486" y="110" width="328" height="32" rx="9" fill="var(--ok-bg)" stroke="var(--ok)" stroke-width="1.2"/>
+        <text x="650" y="130" text-anchor="middle" font-size="10.2" fill="var(--ok)" font-weight="600">Managed DR · continuous replication — failover/failback reverses</text>
+
+        <!-- RECON ENGINE -->
+        <rect class="box eng" x="424" y="168" width="452" height="386" rx="13"/>
+        <text class="at" x="650" y="192" text-anchor="middle">RECON ENGINE</text>
+        <text class="bm" x="650" y="208" text-anchor="middle">primary / neutral workspace · run_as DR SPN</text>
+        <rect class="box2" x="444" y="222" width="412" height="40" rx="8"/>
+        <text class="bt" x="458" y="240">① Scope Resolver</text><text class="cd" x="458" y="254">DR API + states.managed_assets → in-scope inventory + RPO target</text>
+        <rect class="box2" x="444" y="268" width="412" height="40" rx="8"/>
+        <text class="bt" x="458" y="286">② Primary Reader</text><text class="cd" x="458" y="300">fan-out ×10 object readers → {fqn: primary_sig}</text>
+        <rect class="box2" x="444" y="314" width="412" height="40" rx="8"/>
+        <text class="bt" x="458" y="332">③ Secondary Reader</text><text class="cd" x="458" y="346">same readers via monitor client → {fqn: secondary_sig}</text>
+        <rect class="box2" x="444" y="360" width="412" height="40" rx="8"/>
+        <text class="bt" x="458" y="378">④ Differ</text><text class="cd" x="458" y="392">compare: hash · version · row_count · size · grant-set · ACL-set</text>
+        <rect class="box2" x="444" y="406" width="412" height="40" rx="8"/>
+        <text class="bt" x="458" y="424">④ Classifier</text><text class="cd" x="458" y="438">→ IN_SYNC · LAGGING · DRIFTED · MISSING · FAILED · UNSUPPORTED (+severity, readiness)</text>
+        <rect class="box2" x="444" y="452" width="412" height="40" rx="8"/>
+        <text class="bt" x="458" y="470">⑤ Control Writer</text><text class="cd" x="458" y="484">idempotent MERGE per run_id → dr_recon_*</text>
+        <text class="cd" x="650" y="512" text-anchor="middle">object readers ×10: notebooks·jobs·warehouses·clusters·dashboards·files·ws-acls · tables·grants·views/fns</text>
+        <text class="cd" x="650" y="528" text-anchor="middle">direction is data-driven from effective_primary_region (failover/failback = same code, roles swapped)</text>
+        <!-- internal arrows -->
+        <line class="flowline" x1="650" y1="262" x2="650" y2="268" marker-end="url(#a)"/>
+        <line class="flowline" x1="650" y1="308" x2="650" y2="314" marker-end="url(#a)"/>
+        <line class="flowline" x1="650" y1="354" x2="650" y2="360" marker-end="url(#a)"/>
+        <line class="flowline" x1="650" y1="400" x2="650" y2="406" marker-end="url(#a)"/>
+        <line class="flowline" x1="650" y1="446" x2="650" y2="452" marker-end="url(#a)"/>
+
+        <!-- CONTROL TABLES -->
+        <rect class="box" x="424" y="592" width="452" height="94" rx="13"/>
+        <text class="at" x="650" y="614" text-anchor="middle" font-size="12.5">dr_recon_* control tables · Delta (dr_poc.dr_control)</text>
+        <text class="bm" x="446" y="636" font-size="10.5">dr_recon_runs — KPIs + RPO trend</text>
+        <text class="bm" x="662" y="636" font-size="10.5">dr_recon_coverage — scorecard rollup</text>
+        <text class="bm" x="446" y="656" font-size="10.5">dr_recon_inventory — per-object</text>
+        <text class="bm" x="662" y="656" font-size="10.5">dr_recon_findings — errors + gaps</text>
+        <text class="cd" x="650" y="676" text-anchor="middle">the dashboard reads ONLY these tables → decoupled from Managed-DR enrollment</text>
+
+        <!-- DASHBOARD + ALERTS -->
+        <rect class="box eng" x="424" y="722" width="288" height="118" rx="13"/>
+        <text class="at" x="568" y="744" text-anchor="middle" font-size="12.5">AI/BI Dashboard</text>
+        <text class="cd" x="440" y="764">readiness (RAG) · RPO / RTO KPIs</text>
+        <text class="cd" x="440" y="780">coverage scorecard (10 objects)</text>
+        <text class="cd" x="440" y="796">RPO trend · blocking errors · silent gaps</text>
+        <text class="cd" x="440" y="812">failover/failback history + recon</text>
+        <text class="cd" x="440" y="828">per-object drill-down · readiness checklist</text>
+        <rect class="box" x="724" y="722" width="152" height="118" rx="13" stroke="var(--warn)"/>
+        <text class="bt" x="800" y="744" text-anchor="middle" fill="var(--warn)">⑦ ALERTS</text>
+        <text class="cd" x="740" y="766">SQL Alert / webhook</text>
+        <text class="cd" x="740" y="784">new MISSING · FAILED</text>
+        <text class="cd" x="740" y="802">RPO breach</text>
+        <text class="cd" x="740" y="820">readiness ≠ GREEN</text>
+
+        <!-- external flow arrows + numbers + auth -->
+        <!-- trigger -> engine -->
+        <path class="authline" d="M180,92 C180,140 420,150 424,220" marker-end="url(#ac)"/>
+        <text class="authlab" x="196" y="150">invoke</text>
+        <!-- 1 control plane -> scope resolver -->
+        <line class="flowline" x1="650" y1="92" x2="650" y2="222" marker-end="url(#a)"/>
+        <circle class="numbg" cx="668" cy="210" r="10"/><text class="num" x="668" y="214" text-anchor="middle">1</text>
+        <!-- 2 primary sources -> primary reader -->
+        <path class="authline" d="M376,400 C404,400 410,288 444,288" marker-end="url(#ac)"/>
+        <circle class="numbg" cx="410" cy="344" r="10"/><text class="num" x="410" y="348" text-anchor="middle">2</text>
+        <text class="authlab" x="382" y="360">SDK/SQL · DR SPN</text>
+        <!-- 3 secondary/monitor -> secondary reader -->
+        <path class="authline" d="M924,334 C892,334 888,334 856,334" marker-end="url(#ac)"/>
+        <circle class="numbg" cx="890" cy="334" r="10"/><text class="num" x="890" y="338" text-anchor="middle">3</text>
+        <text class="authlab" x="770" y="352">monitor host+token (secret scope)</text>
+        <!-- 5 writer -> tables -->
+        <line class="flowline" x1="650" y1="554" x2="650" y2="592" marker-end="url(#a)"/>
+        <circle class="numbg" cx="668" cy="573" r="10"/><text class="num" x="668" y="577" text-anchor="middle">5</text>
+        <text class="flowlab" x="682" y="576">MERGE · SQL warehouse</text>
+        <!-- 6 tables -> dashboard -->
+        <path class="flowline" d="M600,686 C600,704 580,704 568,722" marker-end="url(#a)"/>
+        <circle class="numbg" cx="600" cy="704" r="10"/><text class="num" x="600" y="708" text-anchor="middle">6</text>
+        <text class="flowlab" x="614" y="704">SQL warehouse</text>
+        <!-- tables -> alerts -->
+        <path class="flowline" d="M760,686 C760,704 790,706 800,722" marker-end="url(#a)"/>
+      </svg>
+
+      <div class="legend">
+        <span><i style="border-color:var(--ok)"></i> primary (writable)</span>
+        <span><i style="border-color:var(--info)"></i> secondary (read-only)</span>
+        <span><i style="border-color:var(--accent)"></i> engine reads/writes (SQL + REST, DR SPN)</span>
+        <span><i style="border-color:var(--muted)"></i> internal data flow</span>
+        <span><i style="border-color:var(--ok)"></i> Managed DR replication</span>
+      </div>
+
+      <div class="flowkey">
+        <div class="k"><div class="bx">1</div><div class="t"><b>Resolve scope</b><br><span>DR REST API + <code>system.replication.states</code> → in-scope catalogs, workspace sets, RPO target, blocking <code>errors[]</code>.</span></div></div>
+        <div class="k"><div class="bx">2</div><div class="t"><b>Read primary</b><br><span>10 object readers over <code>information_schema</code>/Delta/Jobs/Workspace APIs → <code>{fqn: primary_sig}</code>. Auth: DR SPN.</span></div></div>
+        <div class="k"><div class="bx">3</div><div class="t"><b>Read secondary</b><br><span>Same readers via the <b>monitor workspace</b> (host+token from a secret scope) → <code>{fqn: secondary_sig}</code>.</span></div></div>
+        <div class="k"><div class="bx">4</div><div class="t"><b>Diff &amp; classify</b><br><span>Compare signatures; fold in <code>errors[]</code> + silent-gap set → status + severity + run readiness.</span></div></div>
+        <div class="k"><div class="bx">5</div><div class="t"><b>Persist</b><br><span>Idempotent <code>MERGE</code> (per <code>run_id</code>) into the four <code>dr_recon_*</code> tables via the SQL warehouse.</span></div></div>
+        <div class="k"><div class="bx">6</div><div class="t"><b>Publish</b><br><span>AI/BI dashboard reads the tables; <b>⑦</b> alerts fire on regression.</span></div></div>
+        <div class="k"><div class="bx g">↺</div><div class="t"><b>Failover / failback</b><br><span>Direction is read from <code>effective_primary_region</code> — the engine reconciles whichever region is primary and logs each DR event + post-event reconciliation.</span></div></div>
+      </div>
     </div>
-  </div>
+  </section>
+
+  <!-- ===== COMMON RECON PATTERN ===== -->
+  <section>
+    <div class="sechead"><span class="n">2</span><h2>Common recon pattern</h2><span class="note">build this once — every asset plugs into the same skeleton</span></div>
+    <div class="card">
+      <p style="margin:0 0 12px;color:var(--muted);font-size:13px;max-width:88ch">The engine loop, scope resolution, classification, persistence, and alerting are <b>shared</b>. Each object
+      type implements one small <code>AssetReconciler</code> — only four things differ per asset: how it <b>reads</b>, how it
+      <b>keys</b> objects for P↔S matching, what it puts in the <b>signature</b>, and any asset-specific <b>diff</b> nuance.
+      Classification precedence + readiness rollup are common (see the build spec).</p>
+<pre><span class="c"># ---- COMMON (shared by all 10 assets) ----------------------------------</span>
+<span class="k">class</span> AssetReconciler:                 <span class="c"># one subclass per object type</span>
+    object_type: str
+    <span class="k">def</span> read(self, client, scope) -> dict[key, Sig]: ...   <span class="c"># SAME code, primary & secondary client</span>
+    <span class="k">def</span> match_key(self, obj) -> str:   ...   <span class="c"># how P↔S objects are paired</span>
+    <span class="k">def</span> signature(self, obj) -> Sig:  ...   <span class="c"># fields to compare / hash</span>
+    <span class="k">def</span> diff(self, p, s, ctx) -> str: ...    <span class="c"># asset-specific rule → raw status</span>
+
+<span class="k">def</span> run(scope, primary, monitor):        <span class="c"># the shared engine loop</span>
+    rows = []
+    <span class="k">for</span> R <span class="k">in</span> RECONCILERS:                 <span class="c"># the 10 asset reconcilers</span>
+        P = R.read(primary, scope)         <span class="c"># ② {key: primary_sig}</span>
+        S = R.read(monitor, scope)         <span class="c"># ③ {key: secondary_sig}  (read-only, via monitor)</span>
+        <span class="k">for</span> key <span class="k">in</span> P.keys() | S.keys():
+            status = classify(R.diff(P.get(key), S.get(key), ctx))   <span class="c"># ④ common precedence + severity</span>
+            rows.append(record(R.object_type, key, P.get(key), S.get(key), status))
+    persist(rows)                          <span class="c"># ⑤ MERGE → dr_recon_* ; ⑥ dashboard ; ⑦ alerts</span></pre>
+      <p style="margin:12px 0 0;color:var(--muted);font-size:12px"><b>Common precedence</b> (first match wins):
+      <span class="mono">UNSUPPORTED → FAILED → MISSING → DRIFTED → LAGGING → IN_SYNC</span>. <b>Direction</b> (primary vs secondary)
+      is read once from <code>effective_primary_region</code>, so failover/failback reuse the same reconcilers with roles swapped.</p>
+    </div>
+  </section>
+
+  <!-- ===== PER-ASSET IMPLEMENTATION ===== -->
+  <section>
+    <div class="sechead"><span class="n">3</span><h2>Per-asset implementation</h2><span class="note">the four differing pieces + gotchas for each of the top-10 (workspace assets first)</span></div>
+    <div class="assets">
+
+      <div class="asset"><div class="hd"><span class="rk">1</span><h3>Notebooks</h3><span class="tg ws">WS</span></div>
+        <dl>
+          <dt>key</dt><dd>workspace <code>object_id</code> (preserved across regions); path as fallback</dd>
+          <dt>read P</dt><dd><code>ws.workspace.list(recursive)</code> → filter NOTEBOOK; <code>ws.workspace.export(SOURCE)</code></dd>
+          <dt>read S</dt><dd>same via monitor client</dd>
+          <dt>signature</dt><dd><code>{object_id, path, language, sha256(source)}</code></dd>
+          <dt>diff</dt><dd><span class="st crit">MISSING</span> absent · <span class="st warnc">DRIFTED</span> sha≠ (content) or path≠ same id (moved) · else <span class="st okc">IN_SYNC</span></dd>
+          <dt>gotcha</dt><dd class="g">match by <b>object_id, not path</b> (moves ≠ deletes); export cost — hash only in-scope/critical; skip checkpoint dirs.</dd>
+        </dl></div>
+
+      <div class="asset"><div class="hd"><span class="rk">2</span><h3>Jobs / workflows</h3><span class="tg ws">WS</span></div>
+        <dl>
+          <dt>key</dt><dd>job <b>name</b> (<code>job_id</code> is workspace-local)</dd>
+          <dt>read P</dt><dd><code>ws.jobs.list</code> + <code>ws.jobs.get(job_id).settings</code></dd>
+          <dt>read S</dt><dd>monitor <code>ws.jobs.list/get</code></dd>
+          <dt>signature</dt><dd><code>{def_hash(tasks,job_clusters,libraries,params,run_as), schedule{quartz,pause_status}, acl_set}</code></dd>
+          <dt>diff</dt><dd><span class="st crit">MISSING</span> absent · <span class="st warnc">DRIFTED</span> schedule not PAUSED/absent, def≠, or acl≠</dd>
+          <dt>gotcha</dt><dd class="g">secondary schedules must be <b>PAUSED</b> (Managed DR pauses them) — flag active; normalize cluster/pool ids before hashing.</dd>
+        </dl></div>
+
+      <div class="asset"><div class="hd"><span class="rk">3</span><h3>SQL warehouses</h3><span class="tg ws">WS</span></div>
+        <dl>
+          <dt>key</dt><dd>warehouse <b>name</b></dd>
+          <dt>read P</dt><dd><code>ws.warehouses.list/get</code> + <code>ws.permissions.get</code></dd>
+          <dt>read S</dt><dd>same via monitor client</dd>
+          <dt>signature</dt><dd><code>{size, type(PRO/CLASSIC), channel, auto_stop, min/max_clusters, tags}, state, acl_set}</code></dd>
+          <dt>diff</dt><dd><span class="st crit">MISSING</span> absent · <span class="st warnc">DRIFTED</span> state≠STOPPED, config≠, or perms≠</dd>
+          <dt>gotcha</dt><dd class="g">expected <b>STOPPED</b> in secondary; <code>warehouse_id</code> differs → match by name.</dd>
+        </dl></div>
+
+      <div class="asset"><div class="hd"><span class="rk">4</span><h3>Clusters</h3><span class="tg ws">WS</span></div>
+        <dl>
+          <dt>key</dt><dd>cluster <b>name</b></dd>
+          <dt>read P</dt><dd><code>ws.clusters.list/get</code> + <code>ws.permissions.get</code></dd>
+          <dt>read S</dt><dd>same via monitor client</dd>
+          <dt>signature</dt><dd><code>{policy_id, spark_version, node_type, autoscale, init_scripts, libraries, spark_conf}, state, acl_set}</code></dd>
+          <dt>diff</dt><dd><span class="st crit">MISSING</span> absent · <span class="st warnc">DRIFTED</span> state≠TERMINATED, config≠, or perms≠</dd>
+          <dt>gotcha</dt><dd class="g">expected <b>TERMINATED</b>; only all-purpose clusters replicate (job clusters are ephemeral); normalize instance-pool ids.</dd>
+        </dl></div>
+
+      <div class="asset"><div class="hd"><span class="rk">5</span><h3>Draft AI/BI dashboards</h3><span class="tg ws">WS</span></div>
+        <dl>
+          <dt>key</dt><dd>dashboard <code>display_name</code> (or Lakeview id)</dd>
+          <dt>read P</dt><dd><code>ws.lakeview.list/get</code> → <code>serialized_dashboard</code></dd>
+          <dt>read S</dt><dd>same via monitor client</dd>
+          <dt>signature</dt><dd><code>{spec_hash(serialized_dashboard), datasets[], warehouse_ref}</code></dd>
+          <dt>diff</dt><dd><span class="st infoc">UNSUPPORTED</span> if published · <span class="st crit">MISSING</span>/<span class="st crit">FAILED</span> (dataset unresolved) · <span class="st warnc">DRIFTED</span> spec≠</dd>
+          <dt>gotcha</dt><dd class="g">only <b>drafts</b> replicate — flag published; referenced datasets' catalogs must also be in scope.</dd>
+        </dl></div>
+
+      <div class="asset"><div class="hd"><span class="rk">6</span><h3>Files &amp; folders</h3><span class="tg ws">WS</span></div>
+        <dl>
+          <dt>key</dt><dd><code>object_id</code> + path</dd>
+          <dt>read P</dt><dd><code>ws.workspace.list(recursive)</code> → FILE/DIRECTORY; export files</dd>
+          <dt>read S</dt><dd>same via monitor client</dd>
+          <dt>signature</dt><dd><code>{object_id, path, sha256(content)}</code> for files; child-set for folders</dd>
+          <dt>diff</dt><dd><span class="st crit">MISSING</span> absent · <span class="st warnc">DRIFTED</span> extra-in-S or hash≠</dd>
+          <dt>gotcha</dt><dd class="g">skip Repos <code>.git</code> internals; hash raw bytes for binaries; sample large trees.</dd>
+        </dl></div>
+
+      <div class="asset"><div class="hd"><span class="rk">7</span><h3>Workspace ACLs</h3><span class="tg ws">WS</span></div>
+        <dl>
+          <dt>key</dt><dd><code>(asset_type, asset_id)</code> across all WS assets above</dd>
+          <dt>read P</dt><dd><code>ws.permissions.get(object_type, id)</code></dd>
+          <dt>read S</dt><dd>same via monitor client</dd>
+          <dt>signature</dt><dd>set of <code>(principal, permission_level)</code>, principals normalized (SP app-id → name)</dd>
+          <dt>diff</dt><dd><span class="st warnc">DRIFTED</span> set≠ (added/removed listed) · severity WARNING+ (security/operability)</dd>
+          <dt>gotcha</dt><dd class="g">principals must exist in secondary (<b>SCIM</b>); handle inherited vs explicit consistently.</dd>
+        </dl></div>
+
+      <div class="asset"><div class="hd"><span class="rk">8</span><h3>UC managed tables</h3><span class="tg uc">UC</span></div>
+        <dl>
+          <dt>key</dt><dd>fully-qualified <code>catalog.schema.table</code></dd>
+          <dt>read P</dt><dd><code>information_schema.tables/columns</code>; <code>DESCRIBE DETAIL</code>/<code>HISTORY</code></dd>
+          <dt>read S</dt><dd>same SQL on the secondary metastore (via monitor, read-only)</dd>
+          <dt>signature</dt><dd><code>{commit_version, num_rows*, numFiles, sizeInBytes, schema_hash, features}</code></dd>
+          <dt>diff</dt><dd><span class="st crit">FAILED</span> states error · <span class="st crit">MISSING</span> absent/lag=null · <span class="st warnc">DRIFTED</span> sig≠ · <span class="st warnc">LAGGING</span> lag&gt;target</dd>
+          <dt>gotcha</dt><dd class="g">row filters/masks/<b>ABAC</b> → FAILED (Managed-DR limit); row-count is costly — prefer version+size, per-partition/canary for critical; external tables = metadata-only.</dd>
+        </dl></div>
+
+      <div class="asset"><div class="hd"><span class="rk">9</span><h3>UC grants &amp; ownership</h3><span class="tg uc">UC</span></div>
+        <dl>
+          <dt>key</dt><dd>securable fqn (catalog/schema/table/view/fn/volume)</dd>
+          <dt>read P</dt><dd><code>information_schema.{catalog,schema,table,routine}_privileges</code>; owner</dd>
+          <dt>read S</dt><dd>same SQL on the secondary metastore</dd>
+          <dt>signature</dt><dd><code>{grant_set:(principal,privilege), owner, isolation_mode}</code></dd>
+          <dt>diff</dt><dd><span class="st warnc">DRIFTED</span> grant_set≠ (+/-) or owner≠ · severity WARNING+ (security)</dd>
+          <dt>gotcha</dt><dd class="g">normalize principal (SP app-id ↔ name); owner may fall back to the DR service principal — flag it; account for privilege inheritance.</dd>
+        </dl></div>
+
+      <div class="asset"><div class="hd"><span class="rk">10</span><h3>UC views &amp; functions</h3><span class="tg uc">UC</span></div>
+        <dl>
+          <dt>key</dt><dd>fully-qualified name</dd>
+          <dt>read P</dt><dd><code>information_schema.views/routines</code>; <code>SHOW CREATE</code></dd>
+          <dt>read S</dt><dd>same SQL on the secondary metastore</dd>
+          <dt>signature</dt><dd><code>{ddl_hash(normalized), referenced_objects[]}</code></dd>
+          <dt>diff</dt><dd><span class="st crit">MISSING</span> absent · <span class="st crit">FAILED</span> cross-catalog owner-perm gap · <span class="st warnc">DRIFTED</span> ddl≠</dd>
+          <dt>gotcha</dt><dd class="g">normalize DDL (whitespace/quoting) before hashing; cross-catalog views need referenced catalogs in scope + owner perms in secondary.</dd>
+        </dl></div>
+
+    </div>
+  </section>
 
   <div class="foot">
-    Detailed architecture for the DR reconciliation report · pairs with the build spec (<code>dr_reconciliation_design.html</code>),
-    the sample dashboard (<code>dr_reconciliation_dashboard.html</code>), and the research/gap analysis.
+    Detailed architecture + prerequisites for the DR reconciliation report · pairs with the build spec
+    (<code>dr_reconciliation_design.html</code>), the sample dashboard (<code>dr_reconciliation_dashboard.html</code>), and the research/gap analysis.
   </div>
 </div>
 <script>
