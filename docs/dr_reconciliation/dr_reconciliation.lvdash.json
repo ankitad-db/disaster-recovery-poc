@@ -1,0 +1,810 @@
+{
+  "datasets": [
+    {
+      "name": "summary",
+      "displayName": "latest run summary",
+      "queryLines": [
+        "SELECT rpo_lag_ms/1000.0 AS rpo_lag_s, rpo_target_ms/1000.0 AS rpo_target_s, readiness, objects_in_scope, objects_ok, objects_attention, blocking_errors, ROUND(100.0*objects_ok/objects_in_scope,1) AS pct_in_sync, effective_primary_region, failover_group FROM dr_poc.dr_control.dr_recon_runs WHERE run_id = (SELECT run_id FROM dr_poc.dr_control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1)"
+      ]
+    },
+    {
+      "name": "coverage",
+      "displayName": "coverage",
+      "queryLines": [
+        "SELECT object_type, status, cnt FROM dr_poc.dr_control.dr_recon_coverage WHERE run_id = (SELECT run_id FROM dr_poc.dr_control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1)"
+      ]
+    },
+    {
+      "name": "rpo",
+      "displayName": "rpo trend",
+      "queryLines": [
+        "SELECT run_ts, rpo_lag_ms/1000.0 AS rpo_lag_s, rpo_target_ms/1000.0 AS rpo_target_s FROM dr_poc.dr_control.dr_recon_runs ORDER BY run_ts"
+      ]
+    },
+    {
+      "name": "errors",
+      "displayName": "blocking errors",
+      "queryLines": [
+        "SELECT error_class, COUNT(*) AS cnt FROM dr_poc.dr_control.dr_recon_findings WHERE run_id = (SELECT run_id FROM dr_poc.dr_control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1) AND severity <> 'INFO' GROUP BY error_class"
+      ]
+    },
+    {
+      "name": "inventory",
+      "displayName": "per-object",
+      "queryLines": [
+        "SELECT object_type, fqn, status, severity, detail FROM dr_poc.dr_control.dr_recon_inventory WHERE run_id = (SELECT run_id FROM dr_poc.dr_control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1)"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "04f4e7cf",
+      "displayName": "DR Reconciliation",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "157e8119",
+            "spec": {
+              "version": 2,
+              "widgetType": "markdown",
+              "encodings": {},
+              "frame": {
+                "showTitle": false
+              }
+            },
+            "textbox_spec": "## DR Reconciliation \u2014 failover readiness\nObject-level reconciliation of the Managed DR secondary vs the primary. Reads `dr_recon_*` only."
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "8b2340af",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "summary",
+                  "fields": [
+                    {
+                      "name": "readiness",
+                      "expression": "`readiness`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "readiness",
+                  "displayName": "Failover readiness"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Failover readiness"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "57985514",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "summary",
+                  "fields": [
+                    {
+                      "name": "sum_rpo_lag_s",
+                      "expression": "SUM(`rpo_lag_s`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum_rpo_lag_s",
+                  "displayName": "RPO lag (s)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "RPO lag (s)"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f6bf172a",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "summary",
+                  "fields": [
+                    {
+                      "name": "sum_pct_in_sync",
+                      "expression": "SUM(`pct_in_sync`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum_pct_in_sync",
+                  "displayName": "% in sync"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "% in sync"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "c7b60d2c",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "summary",
+                  "fields": [
+                    {
+                      "name": "sum_objects_attention",
+                      "expression": "SUM(`objects_attention`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum_objects_attention",
+                  "displayName": "Need attention"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Need attention"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "0451b244",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "summary",
+                  "fields": [
+                    {
+                      "name": "sum_blocking_errors",
+                      "expression": "SUM(`blocking_errors`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum_blocking_errors",
+                  "displayName": "Blocking errors"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Blocking errors"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "d85a3a26",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "summary",
+                  "fields": [
+                    {
+                      "name": "sum_objects_in_scope",
+                      "expression": "SUM(`objects_in_scope`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum_objects_in_scope",
+                  "displayName": "In scope"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "In scope"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "40a9cdb1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "coverage",
+                  "fields": [
+                    {
+                      "name": "object_type",
+                      "expression": "`object_type`"
+                    },
+                    {
+                      "name": "sum_cnt",
+                      "expression": "SUM(`cnt`)"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "object_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "object_type"
+                },
+                "y": {
+                  "fieldName": "sum_cnt",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "objects"
+                },
+                "color": {
+                  "fieldName": "status",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "IN_SYNC",
+                        "color": "#00A972"
+                      },
+                      {
+                        "value": "LAGGING",
+                        "color": "#FFAB00"
+                      },
+                      {
+                        "value": "DRIFTED",
+                        "color": "#E8590C"
+                      },
+                      {
+                        "value": "MISSING",
+                        "color": "#FF3621"
+                      },
+                      {
+                        "value": "FAILED",
+                        "color": "#B91C1C"
+                      },
+                      {
+                        "value": "UNSUPPORTED",
+                        "color": "#8B5CF6"
+                      }
+                    ]
+                  },
+                  "displayName": "status"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Coverage by object type"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "0db6b2b0",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "rpo",
+                  "fields": [
+                    {
+                      "name": "run_ts",
+                      "expression": "`run_ts`"
+                    },
+                    {
+                      "name": "avg_rpo_lag_s",
+                      "expression": "AVG(`rpo_lag_s`)"
+                    },
+                    {
+                      "name": "avg_rpo_target_s",
+                      "expression": "AVG(`rpo_target_s`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "run_ts",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "run time"
+                },
+                "y": {
+                  "fieldName": "avg_rpo_lag_s",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "RPO lag (s)"
+                },
+                "y2": {
+                  "fieldName": "avg_rpo_target_s",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "RPO trend (lag vs target)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "98d6fc31",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "coverage",
+                  "fields": [
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "sum_cnt",
+                      "expression": "SUM(`cnt`)"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "status",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "status"
+                },
+                "y": {
+                  "fieldName": "sum_cnt",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "objects"
+                },
+                "color": {
+                  "fieldName": "status",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "IN_SYNC",
+                        "color": "#00A972"
+                      },
+                      {
+                        "value": "LAGGING",
+                        "color": "#FFAB00"
+                      },
+                      {
+                        "value": "DRIFTED",
+                        "color": "#E8590C"
+                      },
+                      {
+                        "value": "MISSING",
+                        "color": "#FF3621"
+                      },
+                      {
+                        "value": "FAILED",
+                        "color": "#B91C1C"
+                      },
+                      {
+                        "value": "UNSUPPORTED",
+                        "color": "#8B5CF6"
+                      }
+                    ]
+                  },
+                  "displayName": "status"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Objects by status"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 2,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "49b090be",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "errors",
+                  "fields": [
+                    {
+                      "name": "error_class",
+                      "expression": "`error_class`"
+                    },
+                    {
+                      "name": "sum_cnt",
+                      "expression": "SUM(`cnt`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "error_class",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "error_class"
+                },
+                "y": {
+                  "fieldName": "sum_cnt",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "cnt"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Blocking errors by class"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 9,
+            "width": 4,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "4f85a8bf",
+            "queries": [
+              {
+                "name": "flt_907cacea_object_type",
+                "query": {
+                  "datasetName": "inventory",
+                  "fields": [
+                    {
+                      "name": "object_type",
+                      "expression": "`object_type`"
+                    },
+                    {
+                      "name": "object_type_assoc",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "object_type",
+                    "displayName": "Object type",
+                    "queryName": "flt_907cacea_object_type"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Object type"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "198da1d5",
+            "queries": [
+              {
+                "name": "flt_bd9c9f7f_status",
+                "query": {
+                  "datasetName": "inventory",
+                  "fields": [
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "status_assoc",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "status",
+                    "displayName": "Status",
+                    "queryName": "flt_bd9c9f7f_status"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Status"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 14,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "a55b8e58",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "inventory",
+                  "fields": [
+                    {
+                      "name": "object_type",
+                      "expression": "`object_type`"
+                    },
+                    {
+                      "name": "fqn",
+                      "expression": "`fqn`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "severity",
+                      "expression": "`severity`"
+                    },
+                    {
+                      "name": "detail",
+                      "expression": "`detail`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "object_type",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Object type",
+                    "order": 0,
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "fqn",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Object",
+                    "order": 1,
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "status",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Status",
+                    "order": 2,
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "severity",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Severity",
+                    "order": 3,
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "detail",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Detail",
+                    "order": 4,
+                    "alignContent": "left"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Per-object reconciliation"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 6,
+            "height": 8
+          }
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    }
+  }
+}
