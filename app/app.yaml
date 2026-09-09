@@ -1,0 +1,23 @@
+command:
+  - "python"
+  - "-m"
+  - "uvicorn"
+  - "app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+env:
+  # SQL warehouse used for all reads/writes against dr_recon.control.*
+  - name: DR_WAREHOUSE_ID
+    value: "cc56ad79aa69c967"
+  # Unity Catalog schema holding the reconciliation tables
+  - name: DR_SCHEMA
+    value: "dr_recon.control"
+  # Recon workflow to trigger from the "Run recon now" action
+  - name: DR_RECON_JOB_ID
+    value: "805214227604364"
+  # Genie space scoped to the dr_recon.control tables (Ask Genie tab)
+  - name: DR_GENIE_SPACE_ID
+    value: "01f1ac1d3e09122fbb00b86e6d851083"

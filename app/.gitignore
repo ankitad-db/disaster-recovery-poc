@@ -1,0 +1,17 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Databricks
+.databricks/
+
+# OS
+.DS_Store
+
+# Keep frontend/dist committed for deployment (do NOT ignore it)
