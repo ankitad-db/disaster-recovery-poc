@@ -1,0 +1,40 @@
+# DR Reconciliation — scheduled Workflow (serverless).
+# Runs recon/recon_engine.py --job-mode on the RPO cadence. State-aware: BASELINE (no alerts)
+# while the failover group is INITIAL_REPLICATION, ASSURANCE (findings + alerts) once ACTIVE.
+
+resources:
+  jobs:
+    dr_recon_scheduled:
+      name: "[DR] Reconciliation — workspace assets"
+      tags:
+        project: dr-recon
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}
+      schedule:
+        quartz_cron_expression: ${var.recon_schedule_cron}
+        timezone_id: UTC
+        pause_status: ${var.recon_pause_status}
+      tasks:
+        - task_key: reconcile
+          spark_python_task:
+            python_file: ../recon/recon_engine.py
+            parameters:
+              - "--job-mode"
+              - "--catalog"
+              - "dr_recon"
+              - "--schema"
+              - "control"
+              - "--failover-group"
+              - "fg-dr-recon"
+              - "--peer-scope"
+              - "dr_recon"
+              - "--rpo-target-ms"
+              - "900000"
+          environment_key: recon_env
+      environments:
+        - environment_key: recon_env
+          spec:
+            client: "2"
+            dependencies:
+              - databricks-sdk

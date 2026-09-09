@@ -204,32 +204,65 @@ def main():
     ap.add_argument("--account", default="0d26daa6-5e44-4c97-a497-ef015f91254a")
     ap.add_argument("--failover-group", default="fg-dr-recon")
     ap.add_argument("--rpo-target-ms", type=int, default=900000)  # 15 min
+    ap.add_argument("--job-mode", action="store_true",
+                    help="run on-cluster: ambient primary, secondary from a secret scope, Spark SQL")
+    ap.add_argument("--peer-scope", default="dr_recon", help="secret scope holding the peer host+token")
     args = ap.parse_args()
     from databricks.sdk import WorkspaceClient
-    pw = WorkspaceClient(profile=args.primary)
-    sw = WorkspaceClient(profile=args.secondary)
-    aw = WorkspaceClient(profile="dr2-acct")
+
+    spark = None
+    if args.job_mode:
+        # On-cluster: primary = ambient identity; secondary = peer host+token from a secret scope;
+        # SQL via Spark; DR state from system.replication.states (no account API / laptop profiles).
+        try:
+            from pyspark.sql import SparkSession
+            spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
+        except Exception:
+            spark = None
+        pw = WorkspaceClient()
+        peer_host = pw.dbutils.secrets.get(args.peer_scope, "peer_host") if hasattr(pw, "dbutils") else \
+            pw.secrets.get_secret(args.peer_scope, "peer_host").value
+        peer_token = pw.dbutils.secrets.get(args.peer_scope, "peer_token") if hasattr(pw, "dbutils") else \
+            pw.secrets.get_secret(args.peer_scope, "peer_token").value
+        sw = WorkspaceClient(host=peer_host, token=peer_token)
+        aw = None
+    else:
+        pw = WorkspaceClient(profile=args.primary)
+        sw = WorkspaceClient(profile=args.secondary)
+        aw = WorkspaceClient(profile="dr2-acct")
     C = f"{args.catalog}.{args.schema}"
 
     def run(s):
+        if spark is not None:
+            return spark.sql(s)
         r = pw.statement_execution.execute_statement(warehouse_id=args.warehouse, statement=s, wait_timeout="50s")
         st = str(getattr(r.status, "state", ""))
         if st.endswith(("FAILED", "CANCELED", "CLOSED")):
             raise RuntimeError(f"SQL {st}: {getattr(getattr(r.status,'error',None),'message','')}\n{s[:160]}")
         return r
 
-    # ---- Managed DR signals from the DR REST API + system.replication.states ----
+    def rows_of(r):
+        if spark is not None:
+            return [list(x) for x in r.collect()]
+        return r.result.data_array or []
+
+    # ---- Managed DR signals: DR REST API (if account auth) else system.replication.states ----
     fg_state, primary_region, rpo_lag = "UNKNOWN", "us-east-1", None
+    if aw is not None:
+        try:
+            fg = aw.api_client.do("GET", f"/api/disaster-recovery/v1/accounts/{args.account}/failover-groups/{args.failover_group}")
+            fg_state = fg.get("state", "UNKNOWN"); primary_region = fg.get("effective_primary_region", "us-east-1")
+        except Exception as e:
+            print("  ! DR API:", str(e)[:100])
     try:
-        fg = aw.api_client.do("GET", f"/api/disaster-recovery/v1/accounts/{args.account}/failover-groups/{args.failover_group}")
-        fg_state = fg.get("state", "UNKNOWN"); primary_region = fg.get("effective_primary_region", "us-east-1")
-    except Exception as e:
-        print("  ! DR API:", str(e)[:100])
-    try:
-        r = run(f"SELECT replication_lag_ms FROM system.replication.states "
-                f"WHERE failover_group_name LIKE '%/{args.failover_group}' ORDER BY event_time DESC LIMIT 1")
-        d = r.result.data_array
-        if d and d[0][0] is not None: rpo_lag = int(d[0][0])
+        r = run(f"SELECT replication_state, effective_primary_region, replication_lag_ms "
+                f"FROM system.replication.states WHERE failover_group_name LIKE '%/{args.failover_group}' "
+                f"ORDER BY event_time DESC LIMIT 1")
+        d = rows_of(r)
+        if d:
+            if fg_state == "UNKNOWN" and d[0][0]: fg_state = d[0][0]
+            if d[0][1]: primary_region = d[0][1]
+            if d[0][2] is not None: rpo_lag = int(d[0][2])
     except Exception as e:
         print("  ! replication.states:", str(e)[:100])
 
@@ -289,7 +322,7 @@ def main():
                 f"ORDER BY run_ts DESC LIMIT 1) "
                 f"SELECT fqn, status, primary_sig FROM {C}.dr_recon_inventory "
                 f"WHERE run_id IN (SELECT run_id FROM last)")
-        for row in (r.result.data_array or []): prev[row[0]] = (row[1], row[2])
+        for row in rows_of(r): prev[row[0]] = (row[1], row[2])
     except Exception:
         pass
     audit = []

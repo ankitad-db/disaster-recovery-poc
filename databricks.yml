@@ -1,0 +1,41 @@
+# Databricks Asset Bundle — DR Reconciliation (workspace assets).
+#
+# Deploys the recon engine + a scheduled Workflow that runs it server-side on the RPO cadence.
+# The job runs on SERVERLESS in the PRIMARY workspace as the deploying identity (use a service
+# principal in production). It reads the primary with the ambient identity and the secondary via
+# the `dr_recon` secret scope (peer_host / peer_token), and writes dr_recon.control.*.
+#
+#   databricks bundle validate -t east
+#   databricks bundle deploy   -t east
+#   databricks bundle run dr_recon_scheduled -t east          # on-demand run
+#   # go live (unpause the 15-min schedule) after a clean run once the failover group is ACTIVE:
+#   databricks bundle deploy -t east --var recon_pause_status=UNPAUSED
+
+bundle:
+  name: dr-recon
+
+include:
+  - resources/*.yml
+
+sync:
+  include:
+    - recon/**
+
+variables:
+  recon_schedule_cron:
+    description: Quartz cron for the recon cadence (match your RPO target).
+    default: "0 0/15 * * * ?"      # every 15 minutes
+  recon_pause_status:
+    description: PAUSED|UNPAUSED for the schedule. Deploy PAUSED; unpause after a clean run at ACTIVE.
+    default: "PAUSED"
+  alert_email:
+    description: Address for job-failure notifications.
+    default: ankita.darekar@databricks.com
+
+targets:
+  east:
+    default: true
+    mode: development
+    workspace:
+      profile: dr2-east
+      host: https://fe-sandbox-ankita-ps-dr-wp-us-east-1.cloud.databricks.com
