@@ -243,11 +243,23 @@ def main():
     att = len(rows) - ok
     findings = [r for r in rows if r["status"] in ("MISSING", "FAILED", "DRIFTED", "LAGGING")]
     blocking = sum(1 for r in rows if r["status"] in ("MISSING", "FAILED"))
-    readiness = "CRITICAL" if blocking else ("AT_RISK" if att else "GREEN")
 
-    run(f"INSERT INTO {C}.dr_recon_runs VALUES ({lit(run_id)}, current_timestamp(), "
+    # State-aware: only treat drift as real once Managed DR is ACTIVE (steady state).
+    # During INITIAL_REPLICATION the secondary is legitimately mid-copy -> BASELINE mode:
+    # record inventory + audit, but suppress findings/alarms (readiness = BOOTSTRAP).
+    mode = "ASSURANCE" if fg_state == "ACTIVE" else "BASELINE"
+    if mode == "ASSURANCE":
+        readiness = "CRITICAL" if blocking else ("AT_RISK" if att else "GREEN")
+    else:
+        readiness = "BOOTSTRAP"          # informational; not a failure signal
+        findings = []                    # do not raise findings/alerts during bootstrap
+
+    run(f"INSERT INTO {C}.dr_recon_runs (run_id, run_ts, failover_group, effective_primary_region, "
+        f"rpo_lag_ms, rpo_target_ms, readiness, objects_in_scope, objects_ok, objects_attention, "
+        f"blocking_errors, replication_state, mode) VALUES ({lit(run_id)}, current_timestamp(), "
         f"{lit(args.failover_group)}, {lit(primary_region)}, {lit(rpo_lag)}, {lit(args.rpo_target_ms)}, "
-        f"{lit(readiness)}, {lit(len(rows))}, {lit(ok)}, {lit(att)}, {lit(blocking)})")
+        f"{lit(readiness)}, {lit(len(rows))}, {lit(ok)}, {lit(att)}, {lit(blocking)}, "
+        f"{lit(fg_state)}, {lit(mode)})")
 
     # coverage rollup
     cov = {}
@@ -297,9 +309,10 @@ def main():
             f"{lit(ps)},{lit(ns)},{lit(psig)},{lit(nsig)},{lit(primary_region)},{lit('')})"
             for (fqn, ct, ps, ns, psig, nsig) in audit))
 
-    print(json.dumps({"run_id": run_id, "fg_state": fg_state, "primary_region": primary_region,
-                       "rpo_lag_ms": rpo_lag, "readiness": readiness, "objects": len(rows),
-                       "in_sync": ok, "attention": att, "blocking": blocking,
+    print(json.dumps({"run_id": run_id, "fg_state": fg_state, "mode": mode,
+                       "primary_region": primary_region, "rpo_lag_ms": rpo_lag,
+                       "readiness": readiness, "objects": len(rows), "in_sync": ok,
+                       "attention": att, "blocking": blocking, "findings": len(findings),
                        "audit_changes": len(audit)}, indent=2))
     for r in sorted(rows, key=lambda x: (x["object_type"], x["fqn"])):
         print(f"  {r['status']:<9} {r['object_type']:<11} {r['fqn']}  {r['detail']}")
