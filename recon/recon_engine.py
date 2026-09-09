@@ -151,14 +151,29 @@ READERS = {"notebooks": read_notebooks, "files": read_files, "jobs": read_jobs,
 
 
 # ---------- differ / classifier (common) ----------
+# Managed DR brings replicated compute up DORMANT in the secondary: SQL warehouses STOPPED,
+# clusters TERMINATED, and job schedules PAUSED. A different secondary state = drift.
+EXPECTED_SECONDARY_STATE = {"warehouses": "STOPPED", "clusters": "TERMINATED"}
+
+
 def classify(p, s, obj_type, meta):
+    # Silent gap: object is in scope but of a type/feature Managed DR does not replicate
+    # (e.g. published dashboards, materialized views). Flag so it is never mistaken for replicated.
+    if (p or {}).get("meta", {}).get("unsupported") or (s or {}).get("meta", {}).get("unsupported"):
+        return "UNSUPPORTED"
     if p and not s:
         return "MISSING"
     if s and not p:
         return "DRIFTED"           # extra in secondary
     if p["sig"] != s["sig"]:
         return "DRIFTED"
-    # schedule-state check for jobs: secondary schedule must be PAUSED
+    # secondary must be in the expected dormant state
+    exp = EXPECTED_SECONDARY_STATE.get(obj_type)
+    if exp:
+        st = (s["meta"].get("state") or "").split(".")[-1].upper()
+        if st and st != exp:
+            return "DRIFTED"
+    # jobs: secondary schedule must be PAUSED
     if obj_type == "jobs" and SCHEDULE_MUST_BE_PAUSED:
         sp = (s["meta"].get("schedule") or {}).get("pause")
         if sp and sp != "PAUSED":
@@ -176,9 +191,16 @@ def reconcile(primary_w, secondary_w, object_types):
             st = classify(p, s, t, (p or s))
             fqn = (p or s)["fqn"]
             detail = ""
-            if st == "MISSING": detail = "present in primary, absent in secondary"
-            elif st == "DRIFTED" and p and s: detail = "signature differs (content/config/schedule/ACL)"
+            exp = EXPECTED_SECONDARY_STATE.get(t)
+            sec_state = (s or {}).get("meta", {}).get("state", "").split(".")[-1].upper() if s else ""
+            if st == "UNSUPPORTED": detail = "in scope but Managed DR does not replicate this (silent gap)"
+            elif st == "MISSING": detail = "present in primary, absent in secondary"
             elif st == "DRIFTED" and not p: detail = "extra in secondary (not in primary)"
+            elif st == "DRIFTED" and exp and sec_state and sec_state != exp:
+                detail = f"secondary state {sec_state}, expected {exp}"
+            elif st == "DRIFTED" and t == "jobs" and (s or {}).get("meta", {}).get("schedule", {}).get("pause") not in (None, "PAUSED"):
+                detail = "secondary job schedule not PAUSED"
+            elif st == "DRIFTED": detail = "signature differs (content/config/ACL)"
             rows.append({"object_type": t, "asset_key": key, "fqn": fqn, "status": st,
                          "severity": STATUS_SEVERITY[st],
                          "primary_sig": (p or {}).get("sig", ""), "secondary_sig": (s or {}).get("sig", ""),
@@ -266,6 +288,22 @@ def main():
     except Exception as e:
         print("  ! replication.states:", str(e)[:100])
 
+    # ---- surface Managed DR's OWN blocking errors (native signal we must not miss) ----
+    # errors[] on the latest event lists what Managed DR itself cannot replicate (missing
+    # dependency, unsupported feature, bad storage mapping, ...). These are real regardless
+    # of our BASELINE/ASSURANCE mode, so we always fold them into findings.
+    mdr_errors = []
+    try:
+        r = run(f"SELECT e.error.error_class AS ec, e.error.message AS msg "
+                f"FROM (SELECT explode(errors) AS e FROM system.replication.states "
+                f"WHERE failover_group_name LIKE '%/{args.failover_group}' "
+                f"AND event_time = (SELECT max(event_time) FROM system.replication.states "
+                f"WHERE failover_group_name LIKE '%/{args.failover_group}'))")
+        for row in rows_of(r):
+            mdr_errors.append({"error_class": row[0] or "DR_ERROR", "detail": (row[1] or "")[:400]})
+    except Exception as e:
+        print("  ! errors[] parse:", str(e)[:100])
+
     # ---- reconcile (direction follows effective primary) ----
     if primary_region.startswith("us-west"):
         pw, sw = sw, pw
@@ -275,7 +313,7 @@ def main():
     ok = sum(1 for r in rows if r["status"] == "IN_SYNC")
     att = len(rows) - ok
     findings = [r for r in rows if r["status"] in ("MISSING", "FAILED", "DRIFTED", "LAGGING")]
-    blocking = sum(1 for r in rows if r["status"] in ("MISSING", "FAILED"))
+    blocking = sum(1 for r in rows if r["status"] in ("MISSING", "FAILED")) + len(mdr_errors)
 
     # State-aware: only treat drift as real once Managed DR is ACTIVE (steady state).
     # During INITIAL_REPLICATION the secondary is legitimately mid-copy -> BASELINE mode:
@@ -308,12 +346,15 @@ def main():
             f"{lit(r['status'])},{lit(r['severity'])},{lit(r['primary_sig'])},{lit(r['secondary_sig'])},"
             f"{lit(r['detail'])},current_timestamp())" for r in rows))
 
-    # findings
-    if findings:
+    # findings = our per-object findings (gated by mode) + Managed DR's own errors[] (always)
+    finding_rows = [(r["object_type"], r["fqn"], r["status"], "RECON." + r["status"],
+                     r["detail"], r["severity"]) for r in findings]
+    finding_rows += [("managed_dr", "fg-dr-recon", "FAILED", e["error_class"], e["detail"], "CRITICAL")
+                     for e in mdr_errors]
+    if finding_rows:
         run(f"INSERT INTO {C}.dr_recon_findings VALUES " + ", ".join(
-            f"({lit(run_id)},{lit(r['object_type'])},{lit(r['fqn'])},{lit(r['status'])},"
-            f"{lit('RECON.'+r['status'])},{lit(r['detail'])},{lit(r['severity'])},current_timestamp())"
-            for r in findings))
+            f"({lit(run_id)},{lit(ot)},{lit(fqn)},{lit(dk)},{lit(ec)},{lit(dt)},{lit(sev)},current_timestamp())"
+            for (ot, fqn, dk, ec, dt, sev) in finding_rows))
 
     # ---- incremental audit: diff this run's per-object status vs the previous run ----
     prev = {}
@@ -345,8 +386,8 @@ def main():
     print(json.dumps({"run_id": run_id, "fg_state": fg_state, "mode": mode,
                        "primary_region": primary_region, "rpo_lag_ms": rpo_lag,
                        "readiness": readiness, "objects": len(rows), "in_sync": ok,
-                       "attention": att, "blocking": blocking, "findings": len(findings),
-                       "audit_changes": len(audit)}, indent=2))
+                       "attention": att, "blocking": blocking, "mdr_errors": len(mdr_errors),
+                       "findings": len(finding_rows), "audit_changes": len(audit)}, indent=2))
     for r in sorted(rows, key=lambda x: (x["object_type"], x["fqn"])):
         print(f"  {r['status']:<9} {r['object_type']:<11} {r['fqn']}  {r['detail']}")
 
