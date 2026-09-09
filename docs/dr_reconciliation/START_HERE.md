@@ -77,7 +77,17 @@ progress) a **Databricks App** operator console with **Ask Genie**.
   `UNKNOWN` with a `SECONDARY_UNREACHABLE` finding — never a false "missing".
 
 ## 7. How to use it
-**Dashboard (monitoring):** `https://fe-sandbox-ankita-ps-dr-wp-us-east-1.cloud.databricks.com/sql/dashboardsv3/01f1abfaf70418bca73da438028036ba/published`
+**App — operator console (dashboard + actions + Ask Genie):**
+`https://dr-recon-console-7474649395937386.aws.databricksapps.com` (state ACTIVE). Tabs: Summary
+(readiness verdict + RPO gauge, topology, KPIs, coverage, trend), Findings & changes (with
+Acknowledge), Failover history, Per-object drill-down, and **Ask Genie** (NL Q&A). Actions:
+**Run recon now** (triggers the job), **Acknowledge finding** (mutes it via `dr_recon.control.dr_recon_ack`),
+**Export DR-test sign-off** (`/api/export/signoff.md`|`.json`). Genie space `01f1ac1d3e09122fbb00b86e6d851083`.
+Runs as app SP `dr-recon-console` (feaa9288-…) with SELECT/MODIFY on `dr_recon.control`, CAN_USE on the
+warehouse, CAN_MANAGE_RUN on the job, CAN_RUN on the Genie space. Code under `app/`; to redeploy: rebuild
+`frontend`, `workspace import-dir frontend/dist`, `databricks apps deploy dr-recon-console`.
+
+**Dashboard (AI/BI, monitoring):** `https://fe-sandbox-ankita-ps-dr-wp-us-east-1.cloud.databricks.com/sql/dashboardsv3/01f1abfaf70418bca73da438028036ba/published`
 (runs on east's serverless warehouse; reads `dr_recon.control`.)
 
 **Run a recon manually (from an allowlisted host — see §9):**
@@ -108,8 +118,9 @@ databricks bundle deploy -t east --var recon_pause_status=UNPAUSED   # once §9 
   secondary** (network/admin task) or use PrivateLink/NCC — then unpause (§7).
 - **Managed DR → ACTIVE:** waiting on the one-time bootstrap (Databricks-side timing). Recon auto-flips
   to ASSURANCE then.
-- **Databricks App (operator console + Ask Genie):** in progress (being built/deployed under `app/`).
-  URL + Genie space id + grants will be added here when done.
+- **Databricks App (operator console + Ask Genie):** ✅ **DONE** — deployed, ACTIVE, verified against
+  live data (URL + Genie id in §7). Note: to redeploy, rebuild the frontend and re-import
+  `frontend/dist` (the repo `.gitignore` skips `dist/` during `databricks sync`).
 
 ## 10. Agents (for continued work)
 `.claude/agents/`: `dr-recon-orchestrator` (master), `dr-prereq-provisioner`, `managed-dr-operator`,
