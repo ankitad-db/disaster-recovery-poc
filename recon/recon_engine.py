@@ -242,12 +242,27 @@ def main():
         except Exception:
             spark = None
         pw = WorkspaceClient()
-        peer_host = pw.dbutils.secrets.get(args.peer_scope, "peer_host") if hasattr(pw, "dbutils") else \
-            pw.secrets.get_secret(args.peer_scope, "peer_host").value
-        peer_token = pw.dbutils.secrets.get(args.peer_scope, "peer_token") if hasattr(pw, "dbutils") else \
-            pw.secrets.get_secret(args.peer_scope, "peer_token").value
-        sw = WorkspaceClient(host=peer_host, token=peer_token)
+
+        import base64 as _b64
+        def _sec(k):
+            # dbutils returns plaintext on-cluster; the SDK get_secret returns base64.
+            try:
+                return pw.dbutils.secrets.get(args.peer_scope, k)
+            except Exception:
+                return _b64.b64decode(pw.secrets.get_secret(args.peer_scope, k).value).decode()
+
+        sw = WorkspaceClient(host=_sec("peer_host"), token=_sec("peer_token"))
+        # Fresh failover-group STATE comes from the DR REST API (account-scoped, no ~3h
+        # system-table lag). If account OAuth (M2M) creds are in the secret scope, build an
+        # AccountClient to call it; otherwise fall back to system.replication.states below.
         aw = None
+        try:
+            from databricks.sdk import AccountClient
+            aw = AccountClient(host=_sec("acct_host"), account_id=_sec("account_id"),
+                               client_id=_sec("acct_client_id"), client_secret=_sec("acct_client_secret"))
+        except Exception as e:
+            print("  ! account creds not in scope (state from system table):", str(e)[:80])
+            aw = None
     else:
         pw = WorkspaceClient(profile=args.primary)
         sw = WorkspaceClient(profile=args.secondary)
