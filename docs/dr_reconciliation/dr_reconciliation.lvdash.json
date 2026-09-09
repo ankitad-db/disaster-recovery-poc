@@ -4,47 +4,47 @@
       "name": "summary",
       "displayName": "latest run summary",
       "queryLines": [
-        "SELECT rpo_lag_ms/1000.0 AS rpo_lag_s, rpo_target_ms/1000.0 AS rpo_target_s, readiness, objects_in_scope, objects_ok, objects_attention, blocking_errors, ROUND(100.0*objects_ok/objects_in_scope,1) AS pct_in_sync, effective_primary_region, failover_group FROM dr_poc.dr_control.dr_recon_runs WHERE run_id = (SELECT run_id FROM dr_poc.dr_control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1)"
+        "SELECT rpo_lag_ms/1000.0 AS rpo_lag_s, rpo_target_ms/1000.0 AS rpo_target_s, readiness, objects_in_scope, objects_ok, objects_attention, blocking_errors, ROUND(100.0*objects_ok/objects_in_scope,1) AS pct_in_sync, effective_primary_region, failover_group FROM dr_recon.control.dr_recon_runs WHERE run_id = (SELECT run_id FROM dr_recon.control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1)"
       ]
     },
     {
       "name": "coverage",
       "displayName": "coverage",
       "queryLines": [
-        "SELECT object_type, status, cnt FROM dr_poc.dr_control.dr_recon_coverage WHERE run_id = (SELECT run_id FROM dr_poc.dr_control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1)"
+        "SELECT object_type, status, cnt FROM dr_recon.control.dr_recon_coverage WHERE run_id = (SELECT run_id FROM dr_recon.control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1)"
       ]
     },
     {
       "name": "rpo",
       "displayName": "rpo trend",
       "queryLines": [
-        "SELECT run_ts, rpo_lag_ms/1000.0 AS rpo_lag_s, rpo_target_ms/1000.0 AS rpo_target_s FROM dr_poc.dr_control.dr_recon_runs ORDER BY run_ts"
+        "SELECT run_ts, rpo_lag_ms/1000.0 AS rpo_lag_s, rpo_target_ms/1000.0 AS rpo_target_s FROM dr_recon.control.dr_recon_runs ORDER BY run_ts"
       ]
     },
     {
       "name": "errors",
       "displayName": "blocking errors",
       "queryLines": [
-        "SELECT error_class, COUNT(*) AS cnt FROM dr_poc.dr_control.dr_recon_findings WHERE run_id = (SELECT run_id FROM dr_poc.dr_control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1) AND severity <> 'INFO' GROUP BY error_class"
+        "SELECT error_class, COUNT(*) AS cnt FROM dr_recon.control.dr_recon_findings WHERE run_id = (SELECT run_id FROM dr_recon.control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1) AND severity <> 'INFO' GROUP BY error_class"
       ]
     },
     {
       "name": "inventory",
       "displayName": "per-object",
       "queryLines": [
-        "SELECT object_type, fqn, status, severity, detail FROM dr_poc.dr_control.dr_recon_inventory WHERE run_id = (SELECT run_id FROM dr_poc.dr_control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1)"
+        "SELECT object_type, fqn, status, severity, detail FROM dr_recon.control.dr_recon_inventory WHERE run_id = (SELECT run_id FROM dr_recon.control.dr_recon_runs ORDER BY run_ts DESC LIMIT 1)"
       ]
     }
   ],
   "pages": [
     {
-      "name": "04f4e7cf",
+      "name": "f3d01416",
       "displayName": "DR Reconciliation",
       "pageType": "PAGE_TYPE_CANVAS",
       "layout": [
         {
           "widget": {
-            "name": "157e8119",
+            "name": "ecb2aecd",
             "spec": {
               "version": 2,
               "widgetType": "markdown",
@@ -64,7 +64,7 @@
         },
         {
           "widget": {
-            "name": "8b2340af",
+            "name": "66787a27",
             "queries": [
               {
                 "name": "main_query",
@@ -104,7 +104,7 @@
         },
         {
           "widget": {
-            "name": "57985514",
+            "name": "01df439c",
             "queries": [
               {
                 "name": "main_query",
@@ -144,7 +144,7 @@
         },
         {
           "widget": {
-            "name": "f6bf172a",
+            "name": "14c29c7a",
             "queries": [
               {
                 "name": "main_query",
@@ -184,7 +184,7 @@
         },
         {
           "widget": {
-            "name": "c7b60d2c",
+            "name": "ea60cc13",
             "queries": [
               {
                 "name": "main_query",
@@ -224,7 +224,7 @@
         },
         {
           "widget": {
-            "name": "0451b244",
+            "name": "a8ea5e73",
             "queries": [
               {
                 "name": "main_query",
@@ -264,7 +264,7 @@
         },
         {
           "widget": {
-            "name": "d85a3a26",
+            "name": "08c286a7",
             "queries": [
               {
                 "name": "main_query",
@@ -304,7 +304,7 @@
         },
         {
           "widget": {
-            "name": "40a9cdb1",
+            "name": "9231d8ea",
             "queries": [
               {
                 "name": "main_query",
@@ -395,7 +395,7 @@
         },
         {
           "widget": {
-            "name": "0db6b2b0",
+            "name": "f0e0fad6",
             "queries": [
               {
                 "name": "main_query",
@@ -459,7 +459,7 @@
         },
         {
           "widget": {
-            "name": "98d6fc31",
+            "name": "782f1122",
             "queries": [
               {
                 "name": "main_query",
@@ -553,7 +553,7 @@
         },
         {
           "widget": {
-            "name": "49b090be",
+            "name": "09e68042",
             "queries": [
               {
                 "name": "main_query",
@@ -613,10 +613,10 @@
         },
         {
           "widget": {
-            "name": "4f85a8bf",
+            "name": "271a825c",
             "queries": [
               {
-                "name": "flt_907cacea_object_type",
+                "name": "flt_5583df05_object_type",
                 "query": {
                   "datasetName": "inventory",
                   "fields": [
@@ -641,7 +641,7 @@
                   {
                     "fieldName": "object_type",
                     "displayName": "Object type",
-                    "queryName": "flt_907cacea_object_type"
+                    "queryName": "flt_5583df05_object_type"
                   }
                 ]
               },
@@ -660,10 +660,10 @@
         },
         {
           "widget": {
-            "name": "198da1d5",
+            "name": "49da7c5d",
             "queries": [
               {
-                "name": "flt_bd9c9f7f_status",
+                "name": "flt_021d9d46_status",
                 "query": {
                   "datasetName": "inventory",
                   "fields": [
@@ -688,7 +688,7 @@
                   {
                     "fieldName": "status",
                     "displayName": "Status",
-                    "queryName": "flt_bd9c9f7f_status"
+                    "queryName": "flt_021d9d46_status"
                   }
                 ]
               },
@@ -707,7 +707,7 @@
         },
         {
           "widget": {
-            "name": "a55b8e58",
+            "name": "4ec6f753",
             "queries": [
               {
                 "name": "main_query",

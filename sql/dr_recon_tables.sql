@@ -62,3 +62,42 @@ CREATE TABLE IF NOT EXISTS dr_poc.dr_control.dr_recon_findings (
   first_seen   TIMESTAMP
 ) USING DELTA
 COMMENT 'Blocking-error + silent-gap findings per run.';
+
+-- ---------------------------------------------------------------------------
+-- Incremental-tracking + DR-event tables (added for the live implementation).
+-- ---------------------------------------------------------------------------
+
+-- Append-only audit of per-object status/signature changes across recon runs.
+CREATE TABLE IF NOT EXISTS dr_recon.control.dr_recon_audit (
+  audit_id     STRING NOT NULL,
+  event_time   TIMESTAMP,
+  run_id       STRING,
+  object_type  STRING,
+  fqn          STRING,
+  change_type  STRING,                 -- NEW | CHANGED | REMOVED
+  prev_status  STRING,
+  new_status   STRING,
+  prev_sig     STRING,
+  new_sig      STRING,
+  direction    STRING,
+  detail       STRING
+) USING DELTA
+COMMENT 'Incremental change trail: what changed per object across recon runs.';
+
+-- Failover / failback event log + post-event reconciliation outcome.
+CREATE TABLE IF NOT EXISTS dr_recon.control.dr_recon_events (
+  event_id            STRING NOT NULL,
+  event_time          TIMESTAMP,
+  event_type          STRING,          -- FAILOVER | FAILBACK
+  direction           STRING,
+  from_region         STRING,
+  to_region           STRING,
+  trigger             STRING,          -- drill | planned | unplanned
+  duration_sec        DOUBLE,
+  data_loss_window_ms BIGINT,
+  objects_reconciled  INT,
+  objects_total       INT,
+  outcome             STRING,
+  detail              STRING
+) USING DELTA
+COMMENT 'Failover/failback events for the recon dashboard DR-event history.';
