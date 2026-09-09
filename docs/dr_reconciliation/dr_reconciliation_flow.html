@@ -1,0 +1,248 @@
+<title>DR Reconciliation Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#eef2f6; --surface:#ffffff; --surface-2:#f4f7fa; --border:#cdd8e3;
+    --text:#0f1b26; --muted:#5a6b7b; --faint:#8496a6;
+    --accent:#0e7c8f; --pri:#1971c2; --pri-bg:#e7f5ff; --sec:#6741d9; --sec-bg:#f3f0ff;
+    --acct:#2f9e44; --acct-bg:#ebfbee; --warn:#e8590c;
+    --grid:#e4ebf1; --shadow:0 1px 2px rgba(16,30,45,.06),0 4px 16px rgba(16,30,45,.06);
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace; --sans:"IBM Plex Sans",-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --bg:#0a1017; --surface:#111a23; --surface-2:#16212d; --border:#2b3b49;
+    --text:#e7eef4; --muted:#93a6b6; --faint:#63788a;
+    --accent:#28c2e0; --pri:#4dabf7; --pri-bg:#0e2436; --sec:#a78bfa; --sec-bg:#241a45;
+    --acct:#3fd07f; --acct-bg:#0f2f20; --warn:#f6b23c;
+    --grid:#1e2b37; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 22px rgba(0,0,0,.35);
+  }}
+  :root[data-theme="dark"]{
+    --bg:#0a1017; --surface:#111a23; --surface-2:#16212d; --border:#2b3b49;
+    --text:#e7eef4; --muted:#93a6b6; --faint:#63788a;
+    --accent:#28c2e0; --pri:#4dabf7; --pri-bg:#0e2436; --sec:#a78bfa; --sec-bg:#241a45;
+    --acct:#3fd07f; --acct-bg:#0f2f20; --warn:#f6b23c;
+    --grid:#1e2b37; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 22px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14.5px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1320px;margin:0 auto;padding:22px 22px 64px}
+  .topbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 18px;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
+  .glyph{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(150deg,var(--accent),#155e75);color:#fff;font-size:18px}
+  .topbar h1{font-size:17px;font-weight:600;letter-spacing:-.01em} .topbar .sub{font-size:12px;color:var(--muted)}
+  .toggle{margin-left:auto;border:1px solid var(--border);background:var(--surface-2);color:var(--muted);border-radius:9px;width:36px;height:36px;cursor:pointer;font-size:15px}
+  .toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  section{margin-top:18px}
+  .sechead{display:flex;align-items:baseline;gap:10px;margin:0 2px 10px;flex-wrap:wrap}
+  .sechead .n{font-family:var(--mono);font-size:12px;font-weight:600;color:#fff;background:var(--accent);border-radius:7px;padding:2px 8px}
+  .sechead h2{font-size:15px;font-weight:600}
+  .sechead .note{font-size:12px;color:var(--muted)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;box-shadow:var(--shadow);overflow-x:auto}
+  svg{display:block;width:100%;min-width:1080px;height:auto}
+  .zt{fill:var(--faint);font-size:12px;font-weight:600;letter-spacing:.05em}
+  .bt{fill:var(--text);font-size:12px;font-weight:600}
+  .bm{fill:var(--muted);font-size:10.5px}
+  .cd{fill:var(--muted);font-size:9.6px}
+  .at{fill:var(--accent);font-size:12.5px;font-weight:600}
+  .flowlab{fill:var(--muted);font-size:10px}
+  .replab{fill:var(--acct);font-size:10.5px;font-weight:600}
+  .num{fill:#fff;font-size:11px;font-weight:700}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:7px} .legend i{width:13px;height:13px;border-radius:3px;display:inline-block}
+  .foot{margin-top:22px;font-size:12px;color:var(--faint);text-align:center;line-height:1.6}
+  .build{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  @media(max-width:900px){.build{grid-template-columns:1fr}}
+  .bcard{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 14px;box-shadow:var(--shadow);border-left:3px solid var(--acct)}
+  .bcard h3{margin:0 0 6px;font-size:13px;font-weight:600}
+  .bcard p{margin:0;font-size:12px;color:var(--muted);line-height:1.5}
+  .bcard code{font-family:var(--mono);font-size:11px;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:0 4px}
+</style>
+
+<div class="wrap">
+  <div class="topbar">
+    <div class="glyph">🔄</div>
+    <div><h1>DR Reconciliation — Complete Flow</h1>
+      <div class="sub">Managed DR replicates · our recon verifies, object by object · AWS · east‑1 ⇄ west‑2</div></div>
+    <button class="toggle" id="themeBtn" title="Toggle theme" aria-label="Toggle light/dark theme">◐</button>
+  </div>
+
+  <!-- ARCHITECTURE / DATA FLOW -->
+  <section>
+    <div class="sechead"><span class="n">A</span><h2>Architecture &amp; data flow</h2>
+      <span class="note">Managed DR does replication (green); the recon engine reads both sides + signals, writes tables, feeds the dashboard/app</span></div>
+    <div class="card">
+      <svg viewBox="0 0 1160 620" role="img" aria-label="DR reconciliation architecture and data flow">
+        <defs>
+          <marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+          <marker id="ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="mg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--acct)"/></marker>
+        </defs>
+
+        <!-- ACCOUNT control plane -->
+        <rect x="330" y="14" width="500" height="70" rx="11" fill="var(--acct-bg)" stroke="var(--acct)" stroke-width="1.4"/>
+        <text class="zt" x="346" y="34">ACCOUNT CONTROL PLANE · Managed DR (gated)</text>
+        <text class="bm" x="346" y="52">DR REST API → failover-group STATE + effective_primary_region (real-time)</text>
+        <text class="bm" x="346" y="70">system.replication.states → RPO lag + errors[]  (system table, ≤3h lag)</text>
+
+        <!-- PRIMARY zone -->
+        <rect x="14" y="110" width="740" height="490" rx="14" fill="var(--pri-bg)" stroke="var(--pri)" stroke-width="1.4"/>
+        <text class="zt" x="30" y="134">PRIMARY · us-east-1  (ACTIVE, writable)</text>
+
+        <!-- seeded assets -->
+        <rect x="30" y="146" width="330" height="70" rx="10" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="bt" x="44" y="167">Workspace assets (source of truth)</text>
+        <text class="cd" x="44" y="184">notebooks · files · job (paused) · SQL warehouse</text>
+        <text class="cd" x="44" y="198">· clusters · draft dashboard · ACLs</text>
+
+        <!-- recon engine -->
+        <rect x="30" y="240" width="440" height="150" rx="11" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"/>
+        <text class="at" x="44" y="262">RECON ENGINE · recon_engine.py</text>
+        <text class="cd" x="44" y="280">runs from an allowlisted host now · serverless job when egress allowlisted</text>
+        <text class="bm" x="44" y="300">1  reachability preflight (no false MISSING)</text>
+        <text class="bm" x="44" y="318">2  read PRIMARY + SECONDARY assets (live, REST)</text>
+        <text class="bm" x="44" y="336">3  diff by signature + secondary dormant-state</text>
+        <text class="bm" x="44" y="354">4  classify (state-aware: BASELINE / ASSURANCE)</text>
+        <text class="bm" x="44" y="372">5  MERGE → control tables  (+ incremental audit)</text>
+
+        <!-- control tables -->
+        <rect x="30" y="414" width="440" height="60" rx="10" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="bt" x="44" y="435">dr_recon.control.*</text>
+        <text class="cd" x="44" y="452">runs · coverage · inventory · findings · audit · events</text>
+        <text class="cd" x="44" y="466">(the ONLY thing the dashboard + app read)</text>
+
+        <!-- consumers -->
+        <rect x="30" y="498" width="215" height="86" rx="10" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="bt" x="44" y="519">AI/BI Dashboard</text>
+        <text class="cd" x="44" y="536">readiness · RPO · coverage</text>
+        <text class="cd" x="44" y="550">· findings · drill-down</text>
+        <rect x="255" y="498" width="215" height="86" rx="10" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="bt" x="269" y="519">Databricks App</text>
+        <text class="cd" x="269" y="536">console + actions</text>
+        <text class="cd" x="269" y="550">(run recon / ack / export)</text>
+        <text class="cd" x="269" y="564">+ Ask Genie (NL Q&amp;A)</text>
+
+        <!-- east warehouse -->
+        <rect x="500" y="414" width="238" height="170" rx="10" fill="var(--surface-2)" stroke="var(--border)" stroke-dasharray="5 4"/>
+        <text class="bt" x="514" y="435">EAST serverless warehouse</text>
+        <text class="cd" x="514" y="452">cc56ad79…</text>
+        <text class="cd" x="514" y="472">ALL recon SQL runs here:</text>
+        <text class="cd" x="514" y="488">· system-table + control-table writes</text>
+        <text class="cd" x="514" y="504">· dashboard + app queries</text>
+        <text class="cd" x="514" y="528">Compute lives ONLY in the primary.</text>
+
+        <!-- SECONDARY zone -->
+        <rect x="774" y="110" width="372" height="490" rx="14" fill="var(--sec-bg)" stroke="var(--sec)" stroke-width="1.4"/>
+        <text class="zt" x="790" y="134">SECONDARY · us-west-2  (READ-ONLY)</text>
+        <rect x="790" y="200" width="340" height="120" rx="11" fill="var(--surface)" stroke="var(--sec)"/>
+        <text class="bt" x="806" y="224">Replicated workspace assets</text>
+        <text class="cd" x="806" y="244">warehouses arrive STOPPED,</text>
+        <text class="cd" x="806" y="260">clusters TERMINATED,</text>
+        <text class="cd" x="806" y="276">job schedules PAUSED</text>
+        <text class="cd" x="806" y="300">read via control-plane REST only</text>
+        <rect x="790" y="340" width="340" height="54" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="at" x="806" y="362" fill="var(--sec)">⛔ NO compute on the secondary</text>
+        <text class="cd" x="806" y="380">no cluster/warehouse spun up here by recon</text>
+
+        <!-- arrows -->
+        <!-- managed DR replication east assets -> west assets -->
+        <path d="M360,181 L790,240" fill="none" stroke="var(--acct)" stroke-width="2.4" marker-end="url(#mg)"/>
+        <text class="replab" x="470" y="196">Managed DR replicates (east→west, continuous)</text>
+        <circle cx="470" cy="212" r="9" fill="var(--acct)"/><text class="num" x="470" y="216" text-anchor="middle">R</text>
+
+        <!-- account signals -> engine -->
+        <path d="M470,84 C300,110 250,150 250,240" fill="none" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#ma)"/>
+        <text class="flowlab" x="196" y="150">state + RPO/errors</text>
+
+        <!-- engine reads primary assets -->
+        <path d="M195,216 L195,240" fill="none" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#ma)"/>
+        <circle cx="176" cy="228" r="9" fill="var(--accent)"/><text class="num" x="176" y="232" text-anchor="middle">2</text>
+
+        <!-- engine reads secondary assets (REST) -->
+        <path d="M470,300 C640,300 660,260 790,260" fill="none" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#ma)" marker-start="url(#ma)"/>
+        <text class="flowlab" x="560" y="288">read secondary (REST, no compute)</text>
+
+        <!-- engine -> control tables -->
+        <path d="M250,390 L250,414" fill="none" stroke="var(--muted)" stroke-width="1.6" marker-end="url(#m)"/>
+        <!-- control -> dashboard/app -->
+        <path d="M160,474 L140,498" fill="none" stroke="var(--muted)" stroke-width="1.6" marker-end="url(#m)"/>
+        <path d="M340,474 L360,498" fill="none" stroke="var(--muted)" stroke-width="1.6" marker-end="url(#m)"/>
+        <!-- warehouse executes engine SQL -->
+        <path d="M500,430 L470,420" fill="none" stroke="var(--muted)" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#m)"/>
+      </svg>
+      <div class="legend">
+        <span><i style="background:var(--pri)"></i>primary (active, writable)</span>
+        <span><i style="background:var(--sec)"></i>secondary (read-only, no compute)</span>
+        <span><i style="background:var(--acct)"></i>Managed DR / account control plane</span>
+        <span><i style="background:var(--accent)"></i>recon engine reads/writes</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- PER-RUN FLOW -->
+  <section>
+    <div class="sechead"><span class="n">B</span><h2>What one recon run does</h2>
+      <span class="note">15-min cadence · on-demand · or after a failover/failback</span></div>
+    <div class="card">
+      <svg viewBox="0 0 1120 300" role="img" aria-label="Per-run reconciliation flow">
+        <defs><marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
+        <!-- steps -->
+        <rect x="12" y="60" width="150" height="60" rx="10" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="bt" x="24" y="86">Get DR state</text><text class="cd" x="24" y="104">DR API + system table</text>
+        <rect x="196" y="55" width="140" height="70" rx="10" fill="var(--surface)" stroke="var(--warn)"/>
+        <text class="bt" x="210" y="80">Secondary</text><text class="bt" x="210" y="96">reachable?</text><text class="cd" x="210" y="114">preflight</text>
+        <rect x="196" y="180" width="220" height="56" rx="10" fill="var(--surface)" stroke="var(--warn)"/>
+        <text class="bt" x="210" y="202" fill="var(--warn)">No → UNKNOWN run</text><text class="cd" x="210" y="220">+ SECONDARY_UNREACHABLE (no false MISSING)</text>
+        <rect x="372" y="60" width="170" height="60" rx="10" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="bt" x="386" y="82">Read both sides</text><text class="cd" x="386" y="100">7 asset types, live REST</text>
+        <rect x="576" y="60" width="170" height="60" rx="10" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="bt" x="590" y="82">Diff + classify</text><text class="cd" x="590" y="100">IN_SYNC/DRIFTED/…</text>
+        <rect x="780" y="42" width="150" height="44" rx="10" fill="var(--acct-bg)" stroke="var(--acct)"/>
+        <text class="bt" x="792" y="63">ACTIVE →</text><text class="cd" x="792" y="79">ASSURANCE + alerts</text>
+        <rect x="780" y="96" width="150" height="44" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="bt" x="792" y="117">INIT_REPL →</text><text class="cd" x="792" y="133">BASELINE (no alerts)</text>
+        <rect x="964" y="52" width="150" height="76" rx="10" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"/>
+        <text class="at" x="976" y="72">Write tables</text><text class="cd" x="976" y="90">runs·coverage·inventory</text><text class="cd" x="976" y="104">findings·events</text><text class="cd" x="976" y="118">+ AUDIT: NEW/CHANGED/REMOVED</text>
+        <!-- arrows -->
+        <path d="M162,90 L196,90" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#m2)"/>
+        <path d="M266,125 L266,180" fill="none" stroke="var(--warn)" stroke-width="1.5" marker-end="url(#m2)"/><text class="cd" x="272" y="160">no</text>
+        <path d="M336,90 L372,90" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#m2)"/><text class="cd" x="340" y="82">yes</text>
+        <path d="M542,90 L576,90" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#m2)"/>
+        <path d="M746,84 L780,66" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#m2)"/>
+        <path d="M746,96 L780,114" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#m2)"/>
+        <path d="M930,64 C948,64 948,90 964,90" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#m2)"/>
+        <path d="M930,118 C948,118 948,90 964,90" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#m2)"/>
+      </svg>
+    </div>
+  </section>
+
+  <!-- WHAT'S BUILT -->
+  <section>
+    <div class="sechead"><span class="n">C</span><h2>What's built (complete inventory)</h2>
+      <span class="note">every component that exists today — read left to right, top to bottom</span></div>
+    <div class="build">
+      <div class="bcard done"><h3>1 · Managed DR failover group</h3><p><code>fg-dr-recon</code> east→west, workspace-assets-only, <code>replicate_workspace_assets:true</code>. Created via the account DR REST API. State: replicating.</p></div>
+      <div class="bcard done"><h3>2 · Seeder</h3><p><code>recon/seed_primary_assets.py</code> — creates representative assets in the primary: notebooks, file, job (paused schedule), SQL warehouse, draft dashboard, ACLs.</p></div>
+      <div class="bcard done"><h3>3 · Recon engine (7 readers)</h3><p><code>recon/recon_engine.py</code> — notebooks · files · jobs · warehouses · clusters · dashboards · ACLs. Diff + classifier, laptop &amp; <code>--job-mode</code>.</p></div>
+      <div class="bcard done"><h3>4 · State-aware logic</h3><p>BASELINE during INITIAL_REPLICATION (no alarms) → auto ASSURANCE at ACTIVE (findings + alerts). Direction from <code>effective_primary_region</code>.</p></div>
+      <div class="bcard done"><h3>5 · Incremental change tracking</h3><p>Every run diffs vs the previous → <code>dr_recon_audit</code> rows: <b>NEW / CHANGED / REMOVED</b>. Idempotent (no change → no rows). This is the drift/repair timeline.</p></div>
+      <div class="bcard done"><h3>6 · Managed-DR limitation fixes</h3><p>Surface native <code>errors[]</code>; secondary dormant-state checks (STOPPED/TERMINATED/PAUSED); UNSUPPORTED silent-gap flagging; fresh state via DR API; reachability preflight (no false MISSING).</p></div>
+      <div class="bcard done"><h3>7 · Control tables</h3><p><code>dr_recon.control.*</code> — runs · coverage · inventory · findings · <b>audit</b> · events. The single source the report reads.</p></div>
+      <div class="bcard done"><h3>8 · AI/BI dashboard</h3><p>Lakeview over the control tables: readiness, RPO, coverage, trend, findings, change feed, failover history, drill-down.</p></div>
+      <div class="bcard done"><h3>9 · Databricks App + Ask Genie</h3><p>Operator console: same dashboard + actions (run recon / acknowledge / export sign-off) + NL Q&amp;A over the tables.</p></div>
+      <div class="bcard done"><h3>10 · Scheduled Workflow</h3><p>Asset Bundle job (serverless, 15-min) running the engine in <code>--job-mode</code>. Paused pending the secondary egress allowlist.</p></div>
+      <div class="bcard done"><h3>11 · Failover/failback support</h3><p>Direction auto-detected; DR events + post-event reconciliation recorded in <code>dr_recon_events</code>. Real failover is triggered out-of-band (change-controlled).</p></div>
+      <div class="bcard done"><h3>12 · Docs + agents</h3><p>START_HERE · IMPLEMENTATION_STEPS · TESTING_RUNBOOK · FLOW · this diagram; master + 5 sub-agents under <code>.claude/agents/</code>.</p></div>
+    </div>
+    <div class="foot">
+      Current state: Managed DR = INITIAL_REPLICATION → recon in BASELINE (job IN_SYNC, rest MISSING = expected mid-bootstrap).
+      At ACTIVE it auto-flips to ASSURANCE. Pending: DR→ACTIVE (Databricks timing) + allowlist the serverless egress on the secondary. See START_HERE.md / FLOW.md.
+    </div>
+  </section>
+</div>
+<script>
+  const root=document.documentElement;
+  document.getElementById('themeBtn').addEventListener('click',()=>{
+    const dark=root.getAttribute('data-theme')==='dark'||(!root.getAttribute('data-theme')&&matchMedia('(prefers-color-scheme:dark)').matches);
+    root.setAttribute('data-theme',dark?'light':'dark');});
+</script>
