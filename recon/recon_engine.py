@@ -322,6 +322,28 @@ def main():
     # ---- reconcile (direction follows effective primary) ----
     if primary_region.startswith("us-west"):
         pw, sw = sw, pw
+
+    # Secondary-reachability preflight: if we cannot reach the secondary (IP access list,
+    # network, auth), we must NOT report every object as MISSING (a read failure is not a
+    # deletion). Record an honest UNKNOWN run + a finding, and stop — no false MISSING.
+    try:
+        sw.current_user.me()
+    except Exception as e:
+        run_id = "run_" + now().strftime("%Y%m%dT%H%M%SZ")
+        run(f"INSERT INTO {C}.dr_recon_runs (run_id, run_ts, failover_group, effective_primary_region, "
+            f"rpo_lag_ms, rpo_target_ms, readiness, objects_in_scope, objects_ok, objects_attention, "
+            f"blocking_errors, replication_state, mode) VALUES ({lit(run_id)}, current_timestamp(), "
+            f"{lit(args.failover_group)}, {lit(primary_region)}, {lit(rpo_lag)}, {lit(args.rpo_target_ms)}, "
+            f"{lit('UNKNOWN')}, 0, 0, 0, 0, {lit(fg_state)}, {lit('UNREACHABLE')})")
+        run(f"INSERT INTO {C}.dr_recon_findings VALUES ({lit(run_id)}, 'secondary', 'secondary-workspace', "
+            f"'UNREACHABLE', 'RECON.SECONDARY_UNREACHABLE', "
+            f"{lit('cannot read the secondary (IP access list / network / auth): ' + str(e)[:200])}, "
+            f"'CRITICAL', current_timestamp())")
+        print(json.dumps({"run_id": run_id, "readiness": "UNKNOWN",
+                          "error": "secondary unreachable — no false MISSING recorded",
+                          "detail": str(e)[:160]}, indent=2))
+        return
+
     rows = reconcile(pw, sw, list(READERS))
 
     run_id = "run_" + now().strftime("%Y%m%dT%H%M%SZ")
